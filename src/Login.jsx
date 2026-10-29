@@ -4,7 +4,7 @@ import { ADMIN_WHATSAPP } from './config.js';
 import Wordmark from './Wordmark.jsx';
 
 // Steps: 'phone' -> 'password' (has an account) or 'create' (member without one, or new)
-export default function Login() {
+export default function Login({ backHref = null, note = null }) {
   const [step, setStep] = useState('phone');
   const [digits, setDigits] = useState('');
   const [status, setStatus] = useState(null);
@@ -81,7 +81,9 @@ export default function Login() {
     <main className="shell">
       <header className="topbar">
         <Wordmark small />
+        {backHref && <a className="link" href={backHref}>‹ Back</a>}
       </header>
+      {note && <p className="login-note">{note}</p>}
 
       {step === 'phone' && (
         <form className="stack" onSubmit={submitPhone} noValidate>

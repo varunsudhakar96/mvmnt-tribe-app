@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import {
-  adminListRuns, adminSaveRun, adminDeleteRun, adminNewQr, uploadPoster,
+  adminListRuns, adminSaveRun, adminDeleteRun, adminNewQr, adminAddAttendee, adminRemoveAttendee, uploadPoster, normalisePhone,
   checkinLink, messageFor, runDate, runTime,
 } from './api.js';
 import { go, href } from './router.js';
 
-const LAST_ATTEND = 'mvmnt.lastAttendUrl';
+const LAST_KM = 'mvmnt.lastRunKm';
 const remember = (k, v) => { try { localStorage.setItem(k, v); } catch { /* private mode */ } };
 const recall = (k) => { try { return localStorage.getItem(k) || ''; } catch { return ''; } };
 
@@ -69,7 +69,8 @@ function AdminGroup({ title, runs, empty }) {
               </span>
               <span className="flags">
                 {r.is_today && <span className="today">Today</span>}
-                {!r.attend_url && !r.is_past && <span className="flag">No attend form</span>}
+                {r.signup_count > 0 && <span className="count">{r.signup_count} signed up</span>}
+                {r.attendees?.length > 0 && <span className="count">{r.attendees.length} ran</span>}
               </span>
             </a>
           </li>
@@ -80,11 +81,15 @@ function AdminGroup({ title, runs, empty }) {
 }
 
 // ---------- Add / edit ----------
-const EMPTY = { name: '', date: '', time: '06:00', venue: '', map_url: '', description: '', signup_url: '', attend_url: '', poster_url: '' };
+const EMPTY = { name: '', date: '', time: '06:00', venue: '', map_url: '', description: '', run_km: '5', poster_url: '',
+  signup_enabled: true, signup_fields: [], capacity: '' };
+const LAST_FIELDS = 'mvmnt.lastSignupFields';
+const lastFields = () => { try { return JSON.parse(recall(LAST_FIELDS) || '[]').map((f) => ({ ...f, id: newId() })); } catch { return []; } };
+const newId = () => `f_${Math.random().toString(36).slice(2, 10)}`;
 
 export function AdminRunEdit({ id }) {
   const isNew = id === 'new';
-  const [form, setForm] = useState(isNew ? { ...EMPTY, attend_url: recall(LAST_ATTEND) } : null);
+  const [form, setForm] = useState(isNew ? { ...EMPTY, run_km: recall(LAST_KM) || '5', signup_fields: lastFields() } : null);
   const [saved, setSaved] = useState(null); // the run as stored (has the QR code)
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
@@ -126,7 +131,9 @@ export function AdminRunEdit({ id }) {
     setError(''); setNotice(''); setBusy('save');
     try {
       const r = await adminSaveRun({ ...form, id: isNew ? null : id });
-      if (r.attend_url) remember(LAST_ATTEND, r.attend_url);
+      if (r.run_km) remember(LAST_KM, String(r.run_km));
+      remember(LAST_FIELDS, JSON.stringify(r.signup_fields || []));
+      setForm((f) => ({ ...f, signup_fields: r.signup_fields || [] }));
       setSaved(r);
       if (isNew) { go(`admin/run/${r.id}`); }
       setNotice('Saved. Members can see it now.');
@@ -198,12 +205,11 @@ export function AdminRunEdit({ id }) {
         <Field label="Details" hint="Optional: route, distance, what to bring.">
           <textarea className="input area" rows={3} value={form.description} onChange={set('description')} />
         </Field>
-        <Field label="Sign-up form link" hint="Shows a Sign up button until the run is over. Leave empty to hide it.">
-          <input className="input" type="url" inputMode="url" value={form.signup_url} onChange={set('signup_url')} placeholder="https://forms.gle/…" />
-        </Field>
-        <Field label="Attend form link"
-               hint="Opens after a runner scans the venue QR on run day. Tip: use the form's “Get pre-filled link”, type 9999999999 in the phone question and NAME in the name question, and paste that link. Each runner's number and name then fill in automatically.">
-          <input className="input" type="url" inputMode="url" value={form.attend_url} onChange={set('attend_url')} placeholder="https://docs.google.com/forms/…" />
+        <SignupBuilder form={form} setForm={setForm} hasSignups={(saved?.signup_count || 0) > 0} />
+
+        <Field label="Distance (km)" hint="What a QR check-in logs by default. Runners can change it if they ran more or less.">
+          <input className="input" inputMode="decimal" value={form.run_km ?? ''} placeholder="5"
+                 onChange={(e) => setForm((f) => ({ ...f, run_km: e.target.value.replace(/[^0-9.]/g, '').slice(0, 5) }))} />
         </Field>
 
         {error && <p className="error" role="alert">{error}</p>}
@@ -213,6 +219,8 @@ export function AdminRunEdit({ id }) {
         </button>
       </form>
 
+      {!isNew && saved && <Attendance run={saved} onChange={setSaved} />}
+      {!isNew && saved && <Signups run={saved} />}
       {!isNew && saved && <VenueQr run={saved} onChange={setSaved} />}
 
       {!isNew && (
@@ -241,6 +249,215 @@ function Field({ label, hint, required, children }) {
       {children}
       {hint && <span className="hint">{hint}</span>}
     </label>
+  );
+}
+
+// ---------- Sign-up form builder ----------
+const TYPES = [
+  ['text', 'Short answer'],
+  ['long_text', 'Paragraph'],
+  ['number', 'Number'],
+  ['choice', 'Multiple choice'],
+  ['yes_no', 'Yes / No'],
+];
+
+function SignupBuilder({ form, setForm, hasSignups }) {
+  const fields = form.signup_fields || [];
+  const setFields = (fn) => setForm((f) => ({ ...f, signup_fields: fn(f.signup_fields || []) }));
+  const update = (i, patch) => setFields((fs) => fs.map((x, k) => (k === i ? { ...x, ...patch } : x)));
+  const move = (i, d) => setFields((fs) => {
+    const a = [...fs]; const j = i + d;
+    if (j < 0 || j >= a.length) return a;
+    [a[i], a[j]] = [a[j], a[i]]; return a;
+  });
+
+  return (
+    <section className="builder" aria-labelledby="b-title">
+      <div className="builder-head">
+        <h2 className="section-title" id="b-title">Sign-up form</h2>
+        <label className="toggle">
+          <input type="checkbox" checked={!!form.signup_enabled}
+                 onChange={(e) => setForm((f) => ({ ...f, signup_enabled: e.target.checked }))} />
+          <span>{form.signup_enabled ? 'Open' : 'Closed'}</span>
+        </label>
+      </div>
+      {form.signup_enabled ? (
+        <>
+          <p className="hint">Runners log in to sign up, so their <strong>name and number</strong> come with every sign-up. Add anything else you need below.</p>
+          <label className="field">
+            <span className="label">Spots</span>
+            <input className="input" inputMode="numeric" value={form.capacity ?? ''} placeholder="No limit"
+                   onChange={(e) => setForm((f) => ({ ...f, capacity: e.target.value.replace(/\D/g, '').slice(0, 4) }))} />
+            <span className="hint">Sign-ups stop when it's full. Leave empty for no limit.</span>
+          </label>
+
+          {fields.map((q, i) => (
+            <div className="q-card" key={q.id}>
+              <div className="q-top">
+                <span className="q-num">Q{i + 1}</span>
+                <span className="q-tools">
+                  <button type="button" className="icon-btn" onClick={() => move(i, -1)} disabled={i === 0} aria-label="Move up">↑</button>
+                  <button type="button" className="icon-btn" onClick={() => move(i, 1)} disabled={i === fields.length - 1} aria-label="Move down">↓</button>
+                  <button type="button" className="icon-btn" onClick={() => setFields((fs) => fs.filter((_, k) => k !== i))} aria-label="Remove question">✕</button>
+                </span>
+              </div>
+              <input className="input" value={q.label} placeholder="Question, e.g. T-shirt size"
+                     onChange={(e) => update(i, { label: e.target.value })} aria-label={`Question ${i + 1}`} />
+              <div className="q-row">
+                <select className="input" value={q.type} onChange={(e) => update(i, { type: e.target.value })} aria-label="Answer type">
+                  {TYPES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                </select>
+                <label className="check">
+                  <input type="checkbox" checked={!!q.required} onChange={(e) => update(i, { required: e.target.checked })} />
+                  <span>Required</span>
+                </label>
+              </div>
+              {q.type === 'choice' && (
+                <label className="field">
+                  <span className="hint">Options, one per line</span>
+                  <textarea className="input area" rows={3} value={(q.options || []).join('\n')}
+                            placeholder={'S\nM\nL'}
+                            onChange={(e) => update(i, { options: e.target.value.split('\n') })} />
+                </label>
+              )}
+            </div>
+          ))}
+          <button type="button" className="btn ghost" onClick={() => setFields((fs) => [...fs, { id: newId(), label: '', type: 'text', required: false, options: [] }])}>
+            + Add a question
+          </button>
+          {hasSignups && fields.length > 0 && (
+            <p className="hint">People have already signed up. If you add a required question now, they won't be asked again; their earlier answers stay.</p>
+          )}
+        </>
+      ) : (
+        <p className="hint">The Sign up button is hidden. People already signed up stay signed up.</p>
+      )}
+    </section>
+  );
+}
+
+// ---------- Who ran ----------
+function Attendance({ run, onChange }) {
+  const list = run.attendees || [];
+  const [phone, setPhone] = useState('');
+  const [name, setName] = useState('');
+  const [km, setKm] = useState('');
+  const [needName, setNeedName] = useState(false);
+  const [busy, setBusy] = useState('');
+  const [error, setError] = useState('');
+  const [adding, setAdding] = useState(false);
+
+  async function add(e) {
+    e.preventDefault();
+    const p = normalisePhone(phone);
+    if (!p) { setError(messageFor('invalid_phone')); return; }
+    setBusy('add'); setError('');
+    try {
+      onChange(await adminAddAttendee(run.id, p, km ? Number(km) : null, name));
+      setPhone(''); setName(''); setKm(''); setNeedName(false); setAdding(false);
+    } catch (err) {
+      if (err.code === 'name_needed') setNeedName(true);
+      setError(messageFor(err.code));
+    } finally { setBusy(''); }
+  }
+  async function remove(m) {
+    setBusy(m); setError('');
+    try { onChange(await adminRemoveAttendee(run.id, m)); } catch (err) { setError(messageFor(err.code)); } finally { setBusy(''); }
+  }
+
+  return (
+    <section className="signups" aria-labelledby="att-title">
+      <h2 className="section-title" id="att-title">Checked in · {list.length}</h2>
+      {list.length === 0 && <p className="muted">{run.is_past || run.is_today ? 'Nobody has checked in.' : 'Check-ins open on run day.'}</p>}
+      {list.length > 0 && (
+        <ol className="su-list">
+          {list.map((p) => (
+            <li key={p.member_id}>
+              <div className="su-row">
+                <span>{p.name}{p.by === 'admin check-in' && <span className="muted"> · added by you</span>}</span>
+                <span className="att-right">
+                  <strong className="tabular">{Number(p.km)} km</strong>
+                  <button className="link inline" onClick={() => remove(p.member_id)} disabled={busy === p.member_id}
+                          aria-label={`Remove ${p.name}`}>Remove</button>
+                </span>
+              </div>
+              <span className="muted small">{p.phone}</span>
+            </li>
+          ))}
+        </ol>
+      )}
+      {!adding ? (
+        <button className="btn ghost" onClick={() => setAdding(true)}>+ Add someone who couldn't scan</button>
+      ) : (
+        <form className="stack add-att" onSubmit={add} noValidate>
+          <label className="field">
+            <span className="label">Their number</span>
+            <input className="input" type="tel" inputMode="numeric" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="98765 43210" />
+          </label>
+          {needName && (
+            <label className="field">
+              <span className="label">Their name</span>
+              <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
+            </label>
+          )}
+          <label className="field">
+            <span className="label">Distance (km)</span>
+            <input className="input" inputMode="decimal" value={km} placeholder={String(run.run_km ?? 5)}
+                   onChange={(e) => setKm(e.target.value.replace(/[^0-9.]/g, '').slice(0, 5))} />
+          </label>
+          <button className="btn" type="submit" disabled={busy === 'add'}>{busy === 'add' ? 'Adding…' : 'Add to this run'}</button>
+          <button type="button" className="link" onClick={() => { setAdding(false); setError(''); setNeedName(false); }}>Cancel</button>
+        </form>
+      )}
+      {error && <p className="error" role="alert">{error}</p>}
+    </section>
+  );
+}
+
+// ---------- Who has signed up ----------
+function Signups({ run }) {
+  const list = run.signups || [];
+  const fields = run.signup_fields || [];
+
+  function downloadCsv() {
+    const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const ran = Object.fromEntries((run.attendees || []).map((a) => [a.phone, a.km]));
+    const head = ['Name', 'Number', 'Signed up at', 'Checked in (km)', ...fields.map((f) => f.label)];
+    const rows = list.map((p) => [p.name, p.phone, new Date(p.at).toLocaleString('en-IN'), ran[p.phone] ?? '', ...fields.map((f) => p.answers?.[f.id] ?? '')]);
+    const csv = [head, ...rows].map((r) => r.map(esc).join(',')).join('\n');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv' }));
+    a.download = `signups-${run.date}-${run.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}.csv`;
+    a.click();
+  }
+
+  return (
+    <section className="signups" aria-labelledby="su-title">
+      <h2 className="section-title" id="su-title">
+        Signed up · {list.length}{run.capacity != null ? ` of ${run.capacity}` : ''}
+      </h2>
+      {list.length === 0 ? (
+        <p className="muted">{run.signup_enabled ? 'No sign-ups yet.' : 'Sign-ups are closed.'}</p>
+      ) : (
+        <>
+          <ol className="su-list">
+            {list.map((p, i) => (
+              <li key={`${p.phone}-${i}`}>
+                <div className="su-row"><span>{p.name}</span><span className="muted">{p.phone}</span></div>
+                {fields.some((f) => p.answers?.[f.id]) && (
+                  <div className="su-answers">
+                    {fields.filter((f) => p.answers?.[f.id]).map((f) => (
+                      <span key={f.id}><span className="muted">{f.label}:</span> {p.answers[f.id]}</span>
+                    ))}
+                  </div>
+                )}
+              </li>
+            ))}
+          </ol>
+          <button className="btn ghost" onClick={downloadCsv}>Download list (CSV)</button>
+        </>
+      )}
+    </section>
   );
 }
 
@@ -292,8 +509,7 @@ function VenueQr({ run, onChange }) {
   return (
     <section className="qr-card" aria-labelledby="qr-title">
       <h2 className="section-title" id="qr-title">Venue QR</h2>
-      <p className="muted">Print this and keep it at the start line. It only works on run day, and only for this run.</p>
-      {!run.attend_url && <p className="flag-note">Add an attend form link above, or scanning won't have anywhere to go.</p>}
+      <p className="muted">Print this and keep it at the start line. Runners scan it in the app to log the run. It only works on run day, and only for this run.</p>
       {local && <p className="flag-note">You're on a test copy. Make the QR from the live site so it points to the right address.</p>}
       {src && <img className="qr" src={src} alt="Check-in QR code for this run" />}
       <button className="btn" onClick={download} disabled={!src}>Download QR</button>

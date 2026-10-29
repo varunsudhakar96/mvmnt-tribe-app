@@ -3,7 +3,7 @@ import { getProfile, logOut, messageFor } from './api.js';
 import { useRoute, href } from './router.js';
 import Wordmark from './Wordmark.jsx';
 import Badge from './Badge.jsx';
-import { UpcomingRuns, RunPage, ScanPage, CheckInPage } from './Runs.jsx';
+import { UpcomingRuns, RunPage, ScanPage, CheckInPage, SignupPage } from './Runs.jsx';
 const AdminRuns = lazy(() => import('./Admin.jsx').then((m) => ({ default: m.AdminRuns })));
 const AdminRunEdit = lazy(() => import('./Admin.jsx').then((m) => ({ default: m.AdminRunEdit })));
 const Wait = ({ children }) => (
@@ -42,10 +42,16 @@ export default function Home() {
   useEffect(() => { load(); }, [load]);
   const { parts, query } = useRoute();
 
+  // Came back from "Log in to sign up": continue to where they were going.
+  useEffect(() => {
+    if (parts[0] === 'login') window.location.replace(`#/${query.get('next') || ''}`);
+  }, [parts, query]);
+
   if (profile) {
     const [a, b, c] = parts;
     if (a === 'run' && b && c === 'scan') return <ScanPage id={b} profile={profile} />;
-    if (a === 'run' && b && c === 'checkin') return <CheckInPage id={b} code={query.get('c') || ''} />;
+    if (a === 'run' && b && c === 'signup') return <SignupPage id={b} profile={profile} />;
+    if (a === 'run' && b && c === 'checkin') return <CheckInPage id={b} code={query.get('c') || ''} onLogged={load} />;
     if (a === 'run' && b) return <RunPage id={b} profile={profile} />;
     if (a === 'admin') {
       if (!profile.is_admin) return <NotAllowed />;
@@ -152,7 +158,7 @@ function Dashboard({ p }) {
         )}
       </section>
 
-      <p className="footnote">Totals update every Monday from the run log.</p>
+      <p className="footnote">Runs logged with the QR count straight away.</p>
     </div>
   );
 }

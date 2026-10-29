@@ -40,24 +40,32 @@ select public.admin_reset_account('9876543210');
 This removes only the login. Their member record, runs and badges stay. They then
 open the app, enter their number, and create a new password.
 
-## Upcoming runs and check-in
+## Upcoming runs, sign-ups and check-in
 
-- **Members** see *Upcoming runs* on the home screen. Tapping one opens the run page: poster,
-  date, time, venue with a Maps link, details, and buttons.
-  - **Sign up** opens your sign-up Google Form (shown until the run is over, if you added a link).
-  - **Attend run** appears only on the day of the run. It opens the camera; scanning the venue QR
-    opens your attend Google Form. Scanning the venue QR with the phone's own camera app works too.
-- **Pre-filled forms.** In Google Forms use *Get pre-filled link*, type `9999999999` in the phone
-  question and `NAME` in the name question, and paste that link. The app swaps in each runner's
-  number and name, so entries match the right person on the sheet.
+- **Run pages are public.** Anyone with the link (e.g. shared on WhatsApp) can see the poster,
+  date, time, venue and details without logging in. Signing up and attending need a login;
+  tapping either takes them to log in and then straight back to where they were going.
+- **Sign up happens in the app.** Name and number come from their login. Each run can have its
+  own extra questions (short answer, paragraph, number, multiple choice, yes/no; optional or
+  required) and an optional spots limit. After signing up they see a "You're in" screen; the run
+  page then shows "You're signed up", their answers, *Change answers* and *Can't make it?* (cancel).
+- **Attend run** shows greyed out for signed-up runners until run day, then opens the camera.
+  Scanning the venue QR opens the in-app check-in: the run's distance is filled in, they adjust it
+  if needed and tap *Log my run*. The run goes straight into their totals and the leaderboard, and
+  a new badge is announced on the spot. Scanning again the same day fixes the distance (never a
+  second run). Scanning with the phone's own camera app works too.
+- **Organisers** see who checked in on each run, can add someone who couldn't scan (by number),
+  and remove mistakes. Check-ins are stored as `activities` with detail `app check-in` /
+  `admin check-in`; the weekly sheet sync skips sheet rows for anyone already checked in that day.
 - **The venue QR** is made per run in the admin panel (Download QR). It only works on that run's
   day and only for that run. *Make a new code* kills the old one if a photo of it gets shared.
-  Scanning a QR that is itself a Google Form link also works (it just opens the form).
 
 ## Admin panel
 
 Log in with an organiser account and tap **Admin** (top right). Add, edit or delete runs: poster,
-name, date, start time, venue, Maps link, details, sign-up form link, attend form link.
+name, date, start time, venue, Maps link, details, the sign-up form (open/closed, spots, questions)
+and the attend form link. Each run shows who signed up with their answers, and *Download list (CSV)*
+opens in Excel or Google Sheets. New runs start with the previous run's questions.
 Organisers are members with `is_admin = true`:
 
 ```sql
@@ -107,6 +115,11 @@ node tests/ui-test.mjs ./screenshots          # login + home
 node tests/make-fixtures.mjs tests/fixtures   # needs ffmpeg: fake camera feed + poster
 node tests/runs-test.mjs ./screenshots        # runs, real QR scanning via a fake camera, admin
 ```
+
+## Public leaderboard
+
+The leaderboard site reads `public_leaderboard()` (names, km, runs, badge; no numbers), so it is
+live. Its code lives in the separate leaderboard project.
 
 ## Data freshness
 

@@ -40,6 +40,18 @@ const MESSAGES = {
   date_required: 'Pick the run date.',
   bad_link: 'Links must start with https://',
   upload_failed: "The poster didn't upload. Try a smaller image or try again.",
+  // sign-ups
+  not_logged_in: 'Log in first.',
+  run_over: 'This run has finished.',
+  signups_closed: 'Sign-ups are closed for this run.',
+  answer_required: 'Answer the questions marked *.',
+  answer_too_long: 'One of your answers is too long.',
+  answer_not_number: 'Enter a number where it asks for one.',
+  answer_bad_choice: 'Pick one of the options given.',
+  run_full: 'This run is full.',
+  bad_distance: 'Enter a distance between 0.5 and 60 km.',
+  name_needed: "That number isn't in the Tribe yet. Add their name too.",
+  choice_needs_options: 'Add at least one option to every multiple-choice question.',
 };
 export const messageFor = (code) => MESSAGES[code] ?? MESSAGES.server_error;
 
@@ -112,6 +124,9 @@ export const getProfile = () => rpc('my_profile');
 export const upcomingRuns = () => rpc('upcoming_runs');
 export const runDetail = (id) => rpc('run_detail', { p_id: id });
 export const attendRun = (id, code) => rpc('attend_run', { p_id: id, p_code: code });
+export const signUp = (id, answers) => rpc('sign_up_for_run', { p_id: id, p_answers: answers });
+export const cancelSignup = (id) => rpc('cancel_signup', { p_id: id });
+export const checkInRun = (id, code, km) => rpc('check_in_run', { p_id: id, p_code: code, p_km: km });
 
 // Google Forms pre-fill: in the form's "Get pre-filled link", type 9999999999 in the phone
 // question and NAME in the name question. We swap in the runner's own details.
@@ -142,6 +157,8 @@ export const adminListRuns = () => rpc('admin_list_runs');
 export const adminSaveRun = (run) => rpc('admin_save_run', { p: run });
 export const adminDeleteRun = (id) => rpc('admin_delete_run', { p_id: id });
 export const adminNewQr = (id) => rpc('admin_new_qr', { p_id: id });
+export const adminAddAttendee = (id, phone, km, name) => rpc('admin_add_attendee', { p_id: id, p_phone: phone, p_km: km, p_name: name || null });
+export const adminRemoveAttendee = (id, memberId) => rpc('admin_remove_attendee', { p_id: id, p_member: memberId });
 
 // Shrink big phone photos before upload (max 1600px, JPEG).
 async function shrink(file) {
