@@ -1,7 +1,14 @@
-import { useCallback, useEffect, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useState } from 'react';
 import { getProfile, logOut, messageFor } from './api.js';
+import { useRoute, href } from './router.js';
 import Wordmark from './Wordmark.jsx';
 import Badge from './Badge.jsx';
+import { UpcomingRuns, RunPage, ScanPage, CheckInPage } from './Runs.jsx';
+const AdminRuns = lazy(() => import('./Admin.jsx').then((m) => ({ default: m.AdminRuns })));
+const AdminRunEdit = lazy(() => import('./Admin.jsx').then((m) => ({ default: m.AdminRunEdit })));
+const Wait = ({ children }) => (
+  <Suspense fallback={<main className="shell"><p className="muted">Loading…</p></main>}>{children}</Suspense>
+);
 
 const TIERS = [
   { badge: 'PACER', km: 25 },
@@ -33,12 +40,28 @@ export default function Home() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+  const { parts, query } = useRoute();
+
+  if (profile) {
+    const [a, b, c] = parts;
+    if (a === 'run' && b && c === 'scan') return <ScanPage id={b} profile={profile} />;
+    if (a === 'run' && b && c === 'checkin') return <CheckInPage id={b} code={query.get('c') || ''} />;
+    if (a === 'run' && b) return <RunPage id={b} profile={profile} />;
+    if (a === 'admin') {
+      if (!profile.is_admin) return <NotAllowed />;
+      if (b === 'run' && c) return <Wait><AdminRunEdit id={c} /></Wait>;
+      return <Wait><AdminRuns /></Wait>;
+    }
+  }
 
   return (
     <main className="shell">
       <header className="topbar">
         <Wordmark small />
-        <button className="link" onClick={logOut}>Log out</button>
+        <span className="top-actions">
+          {profile?.is_admin && <a className="link" href={href('admin')}>Admin</a>}
+          <button className="link" onClick={logOut}>Log out</button>
+        </span>
       </header>
 
       {error && (
@@ -57,6 +80,15 @@ export default function Home() {
       )}
 
       {profile && <Dashboard p={profile} />}
+    </main>
+  );
+}
+
+function NotAllowed() {
+  return (
+    <main className="shell">
+      <header className="topbar"><a className="link back" href={href('')}>‹ Home</a></header>
+      <p className="muted">{messageFor('not_admin')}</p>
     </main>
   );
 }
@@ -81,6 +113,8 @@ function Dashboard({ p }) {
           <div><dt>Last run</dt><dd>{shortDate(p.last_run)}</dd></div>
         </dl>
       </section>
+
+      <UpcomingRuns />
 
       <section className="badge-card" aria-label="Your badge">
         <Badge tier={p.badge} />

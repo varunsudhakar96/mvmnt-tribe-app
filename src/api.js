@@ -26,6 +26,20 @@ const MESSAGES = {
   invalid_credentials: "That password isn't right. Try again, or tap Forgot password.",
   network: "Couldn't reach Mvmnt Tribe. Check your connection and try again.",
   server_error: 'Something went wrong on our side. Try again in a minute.',
+  // runs
+  run_not_found: 'This run is no longer listed.',
+  not_today: 'Check-in opens on the day of the run.',
+  wrong_code: "This QR code isn't for this run. Scan the code at the start line.",
+  no_form: "Check-in isn't set up for this run yet. Let the organiser know.",
+  not_qr: "That isn't a Mvmnt Tribe check-in code. Scan the QR at the start line.",
+  camera_denied: 'Camera access is blocked. Allow the camera for this site in your browser settings, or scan the venue QR with your phone camera app.',
+  camera_unavailable: "This browser can't open the camera. Scan the venue QR with your phone camera app instead.",
+  // admin
+  not_admin: 'Only organisers can do this.',
+  run_name_required: 'Add the run name.',
+  date_required: 'Pick the run date.',
+  bad_link: 'Links must start with https://',
+  upload_failed: "The poster didn't upload. Try a smaller image or try again.",
 };
 export const messageFor = (code) => MESSAGES[code] ?? MESSAGES.server_error;
 
@@ -76,8 +90,94 @@ export async function logOut() {
   await supabase.auth.signOut();
 }
 
-export async function getProfile() {
-  const { data, error } = await supabase.rpc('my_profile');
-  if (error) throw new ApiError(/fetch|network/i.test(error.message) ? 'network' : 'server_error');
+async function rpc(fn, args) {
+  let res;
+  try {
+    res = await supabase.rpc(fn, args);
+  } catch {
+    throw new ApiError('network');
+  }
+  const { data, error } = res;
+  if (error) {
+    const msg = String(error.message || '');
+    if (/^[a-z_]+$/.test(msg) && MESSAGES[msg]) throw new ApiError(msg);
+    throw new ApiError(/fetch|network/i.test(msg) ? 'network' : 'server_error');
+  }
   return data;
+}
+
+export const getProfile = () => rpc('my_profile');
+
+// ---- Runs ----
+export const upcomingRuns = () => rpc('upcoming_runs');
+export const runDetail = (id) => rpc('run_detail', { p_id: id });
+export const attendRun = (id, code) => rpc('attend_run', { p_id: id, p_code: code });
+
+// Google Forms pre-fill: in the form's "Get pre-filled link", type 9999999999 in the phone
+// question and NAME in the name question. We swap in the runner's own details.
+export function prefill(url, { name, phone } = {}) {
+  if (!url) return url;
+  let u = url;
+  if (phone) u = u.replace(/9999999999/g, phone);
+  if (name) u = u.replace(/=NAME(?=&|#|$)/g, `=${encodeURIComponent(name)}`);
+  return u;
+}
+
+// A venue QR is a link back into this app: <site>/#/run/<id>/checkin?c=<code>
+export function checkinLink(id, code) {
+  const base = `${window.location.origin}${window.location.pathname}`;
+  return `${base}#/run/${id}/checkin?c=${code}`;
+}
+
+export function readScan(text) {
+  const t = String(text || '').trim();
+  const m = t.match(/#\/run\/([0-9a-f-]{36})\/checkin\?c=([0-9a-z]+)/i);
+  if (m) return { kind: 'checkin', id: m[1], code: m[2] };
+  if (/^https:\/\/(docs\.google\.com\/forms\/|forms\.gle\/)/i.test(t)) return { kind: 'form', url: t };
+  return { kind: 'unknown' };
+}
+
+// ---- Admin ----
+export const adminListRuns = () => rpc('admin_list_runs');
+export const adminSaveRun = (run) => rpc('admin_save_run', { p: run });
+export const adminDeleteRun = (id) => rpc('admin_delete_run', { p_id: id });
+export const adminNewQr = (id) => rpc('admin_new_qr', { p_id: id });
+
+// Shrink big phone photos before upload (max 1600px, JPEG).
+async function shrink(file) {
+  try {
+    const bmp = await createImageBitmap(file);
+    const scale = Math.min(1, 1600 / Math.max(bmp.width, bmp.height));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(bmp.width * scale);
+    canvas.height = Math.round(bmp.height * scale);
+    canvas.getContext('2d').drawImage(bmp, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise((r) => canvas.toBlob(r, 'image/jpeg', 0.85));
+    return blob || file;
+  } catch {
+    return file;
+  }
+}
+
+export async function uploadPoster(file) {
+  const blob = await shrink(file);
+  const type = blob.type || 'image/jpeg';
+  const ext = type === 'image/png' ? 'png' : type === 'image/webp' ? 'webp' : 'jpg';
+  const path = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  const { error } = await supabase.storage
+    .from('run-posters')
+    .upload(path, blob, { contentType: type, cacheControl: '31536000', upsert: false });
+  if (error) throw new ApiError('upload_failed');
+  return supabase.storage.from('run-posters').getPublicUrl(path).data.publicUrl;
+}
+
+// ---- Formatting ----
+export const runDate = (iso, opts = { weekday: 'short', day: 'numeric', month: 'short' }) =>
+  iso ? new Date(`${iso}T00:00:00`).toLocaleDateString('en-GB', opts) : '';
+
+export function runTime(hhmm) {
+  if (!hhmm) return '';
+  const [h, m] = hhmm.split(':').map(Number);
+  const ap = h >= 12 ? 'PM' : 'AM';
+  return `${((h + 11) % 12) + 1}:${String(m).padStart(2, '0')} ${ap}`;
 }
