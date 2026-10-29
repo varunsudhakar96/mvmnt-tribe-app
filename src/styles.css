@@ -1,0 +1,319 @@
+/* Mvmnt Tribe — white, black type, colour only on badges. */
+:root {
+  --bg: #ffffff;
+  --ink: #0a0a0a;
+  --muted: #6b6b6b;
+  --faint: #a3a3a3;
+  --line: #e5e5e5;
+  --field: #fafafa;
+  --error: #b42318;
+  --display: 'Barlow Condensed', 'Arial Narrow', sans-serif;
+  --body: 'Barlow', system-ui, -apple-system, sans-serif;
+  color-scheme: light;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body { background: var(--bg); }
+body {
+  color: var(--ink);
+  font-family: var(--body);
+  font-size: 16px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button, input { font: inherit; color: inherit; }
+button { cursor: pointer; background: none; border: 0; }
+
+.shell {
+  max-width: 440px;
+  min-height: 100dvh;
+  margin: 0 auto;
+  padding: calc(env(safe-area-inset-top) + 16px) 20px calc(env(safe-area-inset-bottom) + 32px);
+}
+.shell.center { display: grid; place-items: center; }
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 44px;
+  margin-bottom: 36px;
+}
+
+.wordmark {
+  height: 30px;
+  aspect-ratio: 640 / 71;
+  max-width: 80vw;
+  background: var(--ink);
+  -webkit-mask: var(--logo) left center / contain no-repeat;
+  mask: var(--logo) left center / contain no-repeat;
+}
+.wordmark.small { height: 20px; max-width: 62%; }
+
+.stack { display: flex; flex-direction: column; gap: 20px; }
+
+.display {
+  font-family: var(--display);
+  font-weight: 800;
+  font-size: 46px;
+  line-height: 0.95;
+  letter-spacing: -0.005em;
+  text-transform: uppercase;
+}
+.lede { margin-top: 12px; color: var(--muted); font-size: 16px; max-width: 34ch; text-wrap: pretty; }
+.error, .note p, .muted { text-wrap: pretty; }
+.muted { color: var(--muted); }
+.eyebrow {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* ---- The bib: the phone number is your race number ---- */
+.bib {
+  position: relative;
+  display: block;
+  border: 1.5px solid var(--ink);
+  border-radius: 18px;
+  padding: 18px 20px 14px;
+  background: var(--bg);
+  transition: box-shadow 0.15s ease;
+}
+.bib:focus-within { box-shadow: 0 0 0 4px rgba(10, 10, 10, 0.08); }
+.pin {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid var(--ink);
+  border-radius: 50%;
+}
+.pin.tl { top: 10px; left: 10px; }
+.pin.tr { top: 10px; right: 10px; }
+.pin.bl { bottom: 10px; left: 10px; }
+.pin.br { bottom: 10px; right: 10px; }
+.bib-head, .bib-foot {
+  display: block;
+  text-align: center;
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.22em;
+  color: var(--muted);
+}
+.bib-number {
+  display: block;
+  width: 100%;
+  margin: 6px 0 2px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  text-align: center;
+  font-family: var(--display);
+  font-weight: 900;
+  font-size: clamp(40px, 13vw, 56px);
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.bib-number::placeholder { color: #d4d4d4; }
+
+/* ---- Fields ---- */
+.field { display: flex; flex-direction: column; gap: 8px; }
+.field label { font-weight: 600; font-size: 15px; }
+.input {
+  width: 100%;
+  height: 54px;
+  padding: 0 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--field);
+  font-size: 17px;
+  outline: 0;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+.input:focus { border-color: var(--ink); background: var(--bg); box-shadow: 0 0 0 4px rgba(10, 10, 10, 0.06); }
+.input::placeholder { color: var(--faint); }
+.hint { font-size: 14px; color: var(--muted); }
+
+.password { position: relative; }
+.password .input { padding-right: 72px; }
+.reveal {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
+  padding: 8px 10px;
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--muted);
+  border-radius: 8px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 14px;
+  padding: 8px 8px 8px 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- Buttons ---- */
+.btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 56px;
+  border-radius: 14px;
+  background: var(--ink);
+  color: var(--bg);
+  font-family: var(--display);
+  font-weight: 800;
+  font-size: 20px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-decoration: none;
+  transition: transform 0.1s ease, opacity 0.15s ease;
+}
+.btn:active { transform: scale(0.99); }
+.btn:disabled { opacity: 0.25; cursor: default; }
+.btn.ghost { background: var(--bg); color: var(--ink); border: 1.5px solid var(--ink); height: 50px; font-size: 18px; }
+
+.link {
+  align-self: center;
+  padding: 6px 4px;
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+}
+.link.inline { padding: 4px 8px; font-size: 14px; }
+
+:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+.input:focus-visible, .bib-number:focus-visible { outline: none; }
+
+.error { color: var(--error); font-weight: 500; font-size: 15px; }
+.note {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  color: var(--muted);
+  font-size: 15px;
+}
+
+/* ---- Home ---- */
+.dash { display: flex; flex-direction: column; gap: 36px; }
+.hero-km {
+  font-family: var(--display);
+  font-weight: 900;
+  font-size: clamp(88px, 30vw, 128px);
+  line-height: 0.85;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  margin-top: 6px;
+}
+.hero-km span {
+  font-size: 0.26em;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  margin-left: 6px;
+  color: var(--muted);
+}
+.stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  margin-top: 22px;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.stats div { padding: 14px 0; }
+.stats div + div { padding-left: 14px; border-left: 1px solid var(--line); }
+.stats dt { font-size: 13px; color: var(--muted); }
+.stats dd {
+  font-family: var(--display);
+  font-weight: 800;
+  font-size: 26px;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+.stats small { font-size: 15px; font-weight: 600; color: var(--muted); }
+
+.badge-card { display: flex; align-items: center; gap: 18px; }
+.badge-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.badge-name {
+  font-family: var(--display);
+  font-weight: 800;
+  font-size: 28px;
+  line-height: 1;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.badge-copy strong { color: var(--ink); font-weight: 600; }
+.bar { height: 4px; border-radius: 4px; background: var(--line); overflow: hidden; margin-top: 4px; }
+.bar span { display: block; height: 100%; background: var(--ink); border-radius: 4px; transition: width 0.8s cubic-bezier(0.2, 0.8, 0.2, 1); }
+
+.section-title {
+  font-family: var(--display);
+  font-weight: 800;
+  font-size: 15px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.runs { list-style: none; }
+.runs li {
+  display: flex;
+  justify-content: space-between;
+  padding: 13px 0;
+  border-bottom: 1px solid var(--line);
+  font-variant-numeric: tabular-nums;
+}
+.run-km { font-family: var(--display); font-weight: 700; font-size: 19px; }
+.footnote { font-size: 13px; color: var(--faint); text-align: center; }
+
+/* ---- Medals: the only colour ---- */
+.medal {
+  flex: none;
+  border-radius: 50%;
+  padding: 5px;
+  background: var(--line);
+}
+.medal-face {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: var(--bg);
+  display: grid;
+  place-content: center;
+  text-align: center;
+  line-height: 0.9;
+}
+.medal-km { font-family: var(--display); font-weight: 900; font-size: 26px; }
+.medal-unit { font-family: var(--display); font-weight: 700; font-size: 11px; letter-spacing: 0.16em; color: var(--muted); }
+.medal-none { background: repeating-conic-gradient(var(--line) 0 8deg, transparent 8deg 16deg); }
+.medal-pacer { background: linear-gradient(135deg, #f0c27a, #c4842a 55%, #8a5a1c); }
+.medal-strider { background: linear-gradient(135deg, #ff6ec4, #7873f5 35%, #4ade80 68%, #06b6d4); }
+.medal-ranger { background: linear-gradient(135deg, #ff8a8a, #f43f5e 50%, #be123c); }
+.medal-wayfarer { background: linear-gradient(135deg, #a7f3d0, #34d399 50%, #059669); }
+.medal-voyager {
+  background: linear-gradient(135deg, #ffffff, #cdd6ea 35%, #d7c9ff 65%, #c9ecff);
+  box-shadow: 0 0 22px rgba(167, 139, 250, 0.35);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition: none !important; animation: none !important; }
+}
