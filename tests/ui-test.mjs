@@ -42,6 +42,7 @@ await page.route(`${SB}/**`, async (route) => {
       refresh_token: 'r', user: { id: 'u-' + phone, aud: 'authenticated', role: 'authenticated', email: body.email } } });
   }
   if (url.includes('/rest/v1/rpc/my_profile')) return route.fulfill({ headers: cors, json: profiles[current] });
+  if (url.includes('/rest/v1/rpc/upcoming_runs')) return route.fulfill({ headers: cors, json: [] });
   if (url.includes('/auth/v1/logout')) { current = null; return route.fulfill({ status: 204, headers: cors }); }
   return route.fulfill({ status: 404, headers: cors, json: {} });
 });
@@ -49,8 +50,17 @@ await page.route(`${SB}/**`, async (route) => {
 const shot = (n) => page.screenshot({ path: `${OUT}/${n}.png`, fullPage: true });
 const text = async () => (await page.locator('main').innerText()).replace(/\s+/g, ' ');
 const check = (label, cond) => console.log(`${cond ? 'PASS' : 'FAIL'}  ${label}`);
+// After logging in: open "your runs" from the profile photo if we landed on the home page.
+const toMe = async () => {
+  await page.waitForSelector('.hero-km, .avatar-btn[href]');
+  if (!(await page.locator('.hero-km').count())) await page.click('.avatar-btn');
+  await page.waitForSelector('.hero-km');
+};
 
-await page.goto(BASE); await page.waitForSelector('#phone');
+await page.goto(BASE); await page.waitForSelector('.hero-quote');
+await page.screenshot({ path: `${OUT}/0-home-logged-out.png`, fullPage: true });
+check('main page is the home page with the quote', (await page.locator('.hero-quote').innerText()).toLowerCase().includes("let's get"));
+await page.click('a:has-text("Log in")'); await page.waitForSelector('#phone');
 await shot('1-phone');
 check('Continue disabled before a full number', await page.locator('button[type=submit]').isDisabled());
 await page.fill('#phone', '+91 98765 00001');
@@ -63,7 +73,10 @@ await page.fill('#new-password', 'right1'); await page.fill('#confirm-password',
 await page.click('text=Create account');
 check('mismatched passwords rejected', (await text()).includes("don't match"));
 await page.fill('#confirm-password', 'right1'); await page.click('text=Create account');
-await page.waitForSelector('.hero-km');
+await page.waitForSelector('.avatar-btn[href]');
+check('after login, home shows the profile photo instead of Log in', (await page.locator('a:has-text("Log in")').count()) === 0);
+await page.screenshot({ path: `${OUT}/0b-home-logged-in.png`, fullPage: false });
+await toMe();
 await page.waitForTimeout(900);
 await shot('3-home-strider');
 const t3 = await text();
@@ -82,7 +95,7 @@ await page.click('text=Forgot password?');
 await shot('4-login-wrong-password-forgot');
 check('forgot password explains reset', (await text()).includes('reset it'));
 await page.fill('#password', 'right1'); await page.click('button:has-text("Log in")');
-await page.waitForSelector('.hero-km'); await page.waitForTimeout(900);
+await toMe(); await page.waitForTimeout(900);
 await shot('5-home-no-badge');
 check('no-badge member sees Pacer target', (await text()).includes('14.94 km to Pacer'));
 
@@ -97,7 +110,7 @@ await page.click('text=Create account');
 check('new member must give a name', (await text()).includes('Add your name'));
 await shot('6-create-new');
 await page.fill('#name', 'New Runner'); await page.click('text=Create account');
-await page.waitForSelector('.hero-km'); await page.waitForTimeout(900);
+await toMe(); await page.waitForTimeout(900);
 await shot('7-home-new');
 check('new member sees empty-state copy', (await text()).includes('No runs logged yet'));
 

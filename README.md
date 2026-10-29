@@ -40,6 +40,17 @@ select public.admin_reset_account('9876543210');
 This removes only the login. Their member record, runs and badges stay. They then
 open the app, enter their number, and create a new password.
 
+## Pages
+
+- **Home (`#/`)**, public: "Let's get stronger together." and the upcoming runs. Logged out it shows
+  *Log in*; logged in it shows the runner's profile photo (or initials), which opens **Your runs
+  (`#/me`)**: km, runs, rank, badge, recent runs, photo upload, Admin (organisers) and Log out.
+- **Log in (`#/login`)**.
+- **Run pages (`#/run/<id>`)** are public and have a **Share** button (phone share sheet, or copies
+  the link). Organisers also get Share on each run's admin page.
+- Profile photos go to the public `avatars` storage bucket; each member can only write to their own
+  folder, and `set_my_avatar()` only accepts their own photo's address.
+
 ## Upcoming runs, sign-ups and check-in
 
 - **Run pages are public.** Anyone with the link (e.g. shared on WhatsApp) can see the poster,

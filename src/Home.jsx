@@ -1,9 +1,11 @@
 import { Suspense, lazy, useCallback, useEffect, useState } from 'react';
-import { getProfile, logOut, messageFor } from './api.js';
+import { getProfile, logOut, messageFor, uploadAvatar } from './api.js';
 import { useRoute, href } from './router.js';
 import Wordmark from './Wordmark.jsx';
 import Badge from './Badge.jsx';
-import { UpcomingRuns, RunPage, ScanPage, CheckInPage, SignupPage } from './Runs.jsx';
+import { RunPage, ScanPage, CheckInPage, SignupPage } from './Runs.jsx';
+import Landing from './Landing.jsx';
+import Avatar from './Avatar.jsx';
 const AdminRuns = lazy(() => import('./Admin.jsx').then((m) => ({ default: m.AdminRuns })));
 const AdminRunEdit = lazy(() => import('./Admin.jsx').then((m) => ({ default: m.AdminRunEdit })));
 const Wait = ({ children }) => (
@@ -58,12 +60,17 @@ export default function Home() {
       if (b === 'run' && c) return <Wait><AdminRunEdit id={c} /></Wait>;
       return <Wait><AdminRuns /></Wait>;
     }
+    if (a !== 'me') return <Landing profile={profile} />;
+  }
+  if (profile === undefined && !error) {
+    return parts.length === 0 ? <Landing profile={undefined} /> : <main className="shell"><p className="muted">Loading…</p></main>;
   }
 
+  // ---- Your runs: the metrics page behind the profile photo ----
   return (
     <main className="shell">
       <header className="topbar">
-        <Wordmark small />
+        <a className="link back" href={href('')}>‹ Home</a>
         <span className="top-actions">
           {profile?.is_admin && <a className="link" href={href('admin')}>Admin</a>}
           <button className="link" onClick={logOut}>Log out</button>
@@ -85,8 +92,30 @@ export default function Home() {
         </p>
       )}
 
+      {profile && <ProfileHead p={profile} onChange={load} />}
       {profile && <Dashboard p={profile} />}
     </main>
+  );
+}
+
+function ProfileHead({ p, onChange }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  async function pick(e) {
+    const f = e.target.files?.[0]; e.target.value = '';
+    if (!f) return;
+    setBusy(true); setErr('');
+    try { await uploadAvatar(f); await onChange(); } catch (x) { setErr(messageFor(x.code)); } finally { setBusy(false); }
+  }
+  return (
+    <div className="profile-head">
+      <label className="avatar-edit" aria-label="Change profile photo">
+        <Avatar name={p.name} url={p.avatar_url} size={72} />
+        <input type="file" accept="image/jpeg,image/png,image/webp" hidden onChange={pick} />
+        <span className="avatar-pen">{busy ? '…' : p.avatar_url ? 'Change' : 'Add photo'}</span>
+      </label>
+      {err && <p className="error small" role="alert">{err}</p>}
+    </div>
   );
 }
 
@@ -119,8 +148,6 @@ function Dashboard({ p }) {
           <div><dt>Last run</dt><dd>{shortDate(p.last_run)}</dd></div>
         </dl>
       </section>
-
-      <UpcomingRuns />
 
       <section className="badge-card" aria-label="Your badge">
         <Badge tier={p.badge} />

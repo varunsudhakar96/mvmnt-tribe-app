@@ -5,6 +5,7 @@ import {
   checkinLink, messageFor, runDate, runTime,
 } from './api.js';
 import { go, href } from './router.js';
+import { answerText, ShareButton } from './Runs.jsx';
 
 const LAST_KM = 'mvmnt.lastRunKm';
 const remember = (k, v) => { try { localStorage.setItem(k, v); } catch { /* private mode */ } };
@@ -162,7 +163,10 @@ export function AdminRunEdit({ id }) {
     <main className="shell">
       <AdminBar back="admin" label="‹ Runs" />
       <form className="stack" onSubmit={save} noValidate>
-        <h1 className="display">{isNew ? 'New run' : 'Edit run'}</h1>
+        <div className="title-row">
+          <h1 className="display">{isNew ? 'New run' : 'Edit run'}</h1>
+          {!isNew && saved && <ShareButton run={saved} />}
+        </div>
 
         <div className="field">
           <span className="label">Poster</span>
@@ -257,7 +261,8 @@ const TYPES = [
   ['text', 'Short answer'],
   ['long_text', 'Paragraph'],
   ['number', 'Number'],
-  ['choice', 'Multiple choice'],
+  ['choice', 'Single choice'],
+  ['checkboxes', 'Checkboxes'],
   ['yes_no', 'Yes / No'],
 ];
 
@@ -312,9 +317,9 @@ function SignupBuilder({ form, setForm, hasSignups }) {
                   <span>Required</span>
                 </label>
               </div>
-              {q.type === 'choice' && (
+              {(q.type === 'choice' || q.type === 'checkboxes') && (
                 <label className="field">
-                  <span className="hint">Options, one per line</span>
+                  <span className="hint">Options, one per line · {q.type === 'checkboxes' ? 'runners can tick several' : 'runners pick one'}</span>
                   <textarea className="input area" rows={3} value={(q.options || []).join('\n')}
                             placeholder={'S\nM\nL'}
                             onChange={(e) => update(i, { options: e.target.value.split('\n') })} />
@@ -423,7 +428,7 @@ function Signups({ run }) {
     const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
     const ran = Object.fromEntries((run.attendees || []).map((a) => [a.phone, a.km]));
     const head = ['Name', 'Number', 'Signed up at', 'Checked in (km)', ...fields.map((f) => f.label)];
-    const rows = list.map((p) => [p.name, p.phone, new Date(p.at).toLocaleString('en-IN'), ran[p.phone] ?? '', ...fields.map((f) => p.answers?.[f.id] ?? '')]);
+    const rows = list.map((p) => [p.name, p.phone, new Date(p.at).toLocaleString('en-IN'), ran[p.phone] ?? '', ...fields.map((f) => answerText(p.answers?.[f.id]))]);
     const csv = [head, ...rows].map((r) => r.map(esc).join(',')).join('\n');
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv' }));
@@ -444,10 +449,10 @@ function Signups({ run }) {
             {list.map((p, i) => (
               <li key={`${p.phone}-${i}`}>
                 <div className="su-row"><span>{p.name}</span><span className="muted">{p.phone}</span></div>
-                {fields.some((f) => p.answers?.[f.id]) && (
+                {fields.some((f) => answerText(p.answers?.[f.id])) && (
                   <div className="su-answers">
-                    {fields.filter((f) => p.answers?.[f.id]).map((f) => (
-                      <span key={f.id}><span className="muted">{f.label}:</span> {p.answers[f.id]}</span>
+                    {fields.filter((f) => answerText(p.answers?.[f.id])).map((f) => (
+                      <span key={f.id}><span className="muted">{f.label}:</span> {answerText(p.answers[f.id])}</span>
                     ))}
                   </div>
                 )}

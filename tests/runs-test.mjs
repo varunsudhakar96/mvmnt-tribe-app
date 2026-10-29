@@ -25,7 +25,8 @@ let runs = [
   { id: '22222222-2222-4222-8222-222222222222', name: 'Hill Repeats', date: ist(3), time: '05:45', venue: 'Marudhamalai foothills',
     map_url: null, poster_url: null, description: null, attend_url: FORM, check_in_code: 'ffff00001111', capacity: 30, signup_enabled: true,
     signup_fields: [{ id: 'f_size', label: 'T-shirt size', type: 'choice', required: true, options: ['S', 'M', 'L'] },
-                    { id: 'f_sos', label: 'Emergency contact', type: 'text', required: false, options: [] }] },
+                    { id: 'f_sos', label: 'Emergency contact', type: 'text', required: false, options: [] },
+                    { id: 'f_food', label: 'Breakfast after', type: 'checkboxes', required: true, options: ['Idli', 'Pongal', 'Coffee'] }] },
   { id: '55555555-5555-4555-8555-555555555555', name: 'Track Night', date: ist(4), time: '18:30', venue: 'Nehru Stadium',
     map_url: null, poster_url: null, description: null, attend_url: null, check_in_code: 'dddd00001111', capacity: 1, signup_enabled: true, signup_fields: [] },
   { id: '33333333-3333-4333-8333-333333333333', name: 'Old Run', date: ist(-7), time: '06:00', venue: 'Somewhere',
@@ -80,11 +81,13 @@ async function run(cameraFile, fn) {
       return ok({ access_token: jwt(current), token_type: 'bearer', expires_in: 3600, expires_at: now + 3600, refresh_token: 'r',
         user: { id: 'u-' + current, aud: 'authenticated', role: 'authenticated', email: body.email } });
     }
+    if (url.includes('/auth/v1/user')) return ok({ id: 'u-' + current, aud: 'authenticated', role: 'authenticated', email: current + '@members.mvmnttribe.app' });
     if (url.includes('/functions/v1/member-auth')) return ok({ ok: true, status: 'has_account' });
     const rpc = url.match(/\/rest\/v1\/rpc\/(\w+)/)?.[1];
     const admin = users[current]?.is_admin;
     switch (rpc) {
       case 'my_profile': return ok(profile(current));
+      case 'set_my_avatar': users[current].avatar_url = body.p_url; return ok({ avatar_url: body.p_url });
       case 'upcoming_runs': return ok(runs.filter((r) => r.date >= TODAY).sort((a, b) => a.date.localeCompare(b.date)).map(pub));
       case 'run_detail': { const r = runs.find((x) => x.id === body.p_id); return ok(r ? pub(r) : null); }
       case 'sign_up_for_run': {
@@ -92,8 +95,10 @@ async function run(cameraFile, fn) {
         const r = runs.find((x) => x.id === body.p_id);
         for (const f of r.signup_fields) {
           const v = (body.p_answers || {})[f.id];
-          if (f.required && !v) return fail('answer_required');
+          if (f.required && f.type !== 'checkboxes' && !v) return fail('answer_required');
           if (v && f.type === 'choice' && !f.options.includes(v)) return fail('answer_bad_choice');
+          if (f.type === 'checkboxes' && f.required && !(Array.isArray(v) && v.length)) return fail('answer_required');
+          if (f.type === 'checkboxes' && v && !Array.isArray(v)) return fail('answer_bad_choice');
         }
         const key = `${r.id}:${current}`;
         if (!signed[key] && r.capacity != null && pub(r).spots_left <= 0) return fail('run_full');
@@ -142,12 +147,14 @@ async function run(cameraFile, fn) {
         Object.assign(r, { name: p.name, date: p.date, time: p.time || null, venue: p.venue || null, map_url: p.map_url || null,
           poster_url: p.poster_url || null, description: p.description || null, run_km: p.run_km ? Number(p.run_km) : 5,
           signup_enabled: p.signup_enabled !== false, capacity: p.capacity ? Number(p.capacity) : null,
-          signup_fields: (p.signup_fields || []).filter((f) => f.label?.trim()).map((f) => ({ ...f, options: f.type === 'choice' ? f.options.map((o) => o.trim()).filter(Boolean) : [] })) });
+          signup_fields: (p.signup_fields || []).filter((f) => f.label?.trim()).map((f) => ({ ...f, options: (f.type === 'choice' || f.type === 'checkboxes') ? f.options.map((o) => o.trim()).filter(Boolean) : [] })) });
         return ok(adm(r));
       }
       case 'admin_new_qr': { const r = runs.find((x) => x.id === body.p_id); r.check_in_code = 'beef' + r.check_in_code.slice(4); return ok(adm(r)); }
       case 'admin_delete_run': runs = runs.filter((x) => x.id !== body.p_id); return ok({ ok: true });
     }
+    if (/\/storage\/v1\/object\/avatars\//.test(url) && req.method() === 'POST') return ok({ Key: 'avatars/x' });
+    if (/\/storage\/v1\/object\/public\/avatars\//.test(url)) return route.fulfill({ headers: { ...cors, 'content-type': 'image/jpeg' }, body: poster });
     const up = url.match(/\/storage\/v1\/object\/run-posters\/(.+)$/);
     if (up && req.method() === 'POST') { uploads[up[1]] = req.postDataBuffer(); return ok({ Key: `run-posters/${up[1]}`, Id: 'x' }); }
     const get = url.match(/\/storage\/v1\/object\/public\/run-posters\/(.+)$/);
@@ -160,10 +167,10 @@ async function run(cameraFile, fn) {
 const text = async (page) => (await page.locator('main').innerText()).replace(/\s+/g, ' ').toLowerCase();
 const check = (label, cond) => console.log(`${cond ? 'PASS' : 'FAIL'}  ${label}`);
 const login = async (page, phone) => {
-  await page.goto(BASE); await page.waitForSelector('#phone');
+  await page.goto(`${BASE}/#/login`); await page.waitForSelector('#phone');
   await page.fill('#phone', phone); await page.click('text=Continue');
   await page.waitForSelector('#password'); await page.fill('#password', 'right1');
-  await page.click('button:has-text("Log in")'); await page.waitForSelector('.hero-km');
+  await page.click('button:has-text("Log in")'); await page.waitForSelector('.avatar-btn[href]');
 };
 
 // ---- Member: browse, run page, sign up, attend by scanning ----
@@ -175,7 +182,18 @@ await run(`${FIX}/qr.y4m`, async (page) => {
   const t = await text(page);
   check('home lists upcoming runs (3), not past ones', (await page.locator('.run-card').count()) === 3 && !t.includes('old run'));
   check('today run flagged TODAY', (await page.locator('.run-card').first().innerText()).includes('TODAY'));
+  check('home: profile photo, quote and runs', (await page.locator('.hero-quote').count()) === 1);
+  await page.click('.avatar-btn'); await page.waitForSelector('.hero-km');
+  check('profile photo opens your runs page', true);
+  check('no photo yet: shows initials', (await page.locator('.profile-head .initials').innerText()) === 'AK');
+  await page.setInputFiles('.avatar-edit input[type=file]', `${FIX}/poster.jpg`);
+  await page.waitForSelector('.profile-head img.avatar');
+  check('runner can add a profile photo', (users['9876500001'].avatar_url || '').includes('/avatars/u-9876500001/'));
+  await page.screenshot({ path: `${OUT}/p1-metrics-photo.png`, fullPage: false });
   check('member sees no Admin link', (await page.locator('a:has-text("Admin")').count()) === 0);
+  await page.click('text=‹ Home'); await page.waitForSelector('.run-card');
+  check('home shows the photo in the corner', (await page.locator('.avatar-btn img.avatar').count()) === 1);
+  await page.screenshot({ path: `${OUT}/p2-home-logged-in.png`, fullPage: false });
 
   await page.locator('.run-card', { hasText: 'Hill Repeats' }).click();
   await page.waitForSelector('h1:has-text("Hill Repeats")');
@@ -211,6 +229,7 @@ await run(`${FIX}/qr.y4m`, async (page) => {
   check('crossing 50 km shows Strider unlocked', (await text(page)).includes('strider unlocked'));
   check('check-in stored straight away', checkins[`${TODAY_ID}:9876500001`] === 5.5);
   await page.click('button:has-text("Done")');
+  await page.waitForSelector('.avatar-btn[href]'); await page.click('.avatar-btn');
   await page.waitForSelector('.hero-km');
   await page.waitForTimeout(400);
   check('home total updates immediately (52.5)', (await page.locator('.hero-km').innerText()).includes('52.5'));
@@ -244,6 +263,12 @@ await run(`${FIX}/qr.y4m`, async (page) => {
   await page.waitForSelector('h1:has-text("Hill Repeats")');
   await page.screenshot({ path: `${OUT}/u1-public-run.png`, fullPage: false });
   check('run page opens without logging in', (await page.locator('#phone').count()) === 0);
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: BASE });
+  await page.evaluate(() => { delete Navigator.prototype.share; });
+  await page.click('button:has-text("Share")');
+  await page.waitForSelector('text=Link copied');
+  const clip = await page.evaluate(() => navigator.clipboard.readText());
+  check('Share copies the run name and link', clip.includes('Hill Repeats') && clip.includes('#/run/22222222-2222-4222-8222-222222222222'));
   check('logged out: shows spots left', (await text(page)).includes('30 of 30 spots left'));
   check('logged out: tells them they will log in first', (await text(page)).includes("you'll log in with your number first"));
   await page.click('a:has-text("Sign up")');
@@ -259,16 +284,24 @@ await run(`${FIX}/qr.y4m`, async (page) => {
   await page.screenshot({ path: `${OUT}/u2-form-required.png`, fullPage: false });
   await page.click('label.option:has-text("M")');
   await page.fill('#q-f_sos', 'Mum 98400 00000');
+  await page.click('button:has-text("Confirm sign-up")');
+  check('required checkbox question enforced', (await text(page)).includes('tick at least one'));
+  await page.click('label.option.box:has-text("Coffee")');
+  await page.click('label.option.box:has-text("Idli")');
+  await page.click('label.option.box:has-text("Pongal")');
+  await page.click('label.option.box:has-text("Pongal")');
   await page.screenshot({ path: `${OUT}/u3-form-filled.png`, fullPage: false });
   await page.click('button:has-text("Confirm sign-up")');
   await page.waitForSelector("text=You're in.");
   check('confirmation screen after signing up', (await text(page)).includes('signed up for hill repeats'));
   check('answers saved', signed['22222222-2222-4222-8222-222222222222:9876500001']?.f_size === 'M' && signed['22222222-2222-4222-8222-222222222222:9876500001']?.f_sos === 'Mum 98400 00000');
+  check('checkboxes saved as a list in option order (Idli, Coffee)', JSON.stringify(signed['22222222-2222-4222-8222-222222222222:9876500001']?.f_food) === '["Idli","Coffee"]');
   await page.waitForTimeout(700);
   await page.screenshot({ path: `${OUT}/u4-confirmation.png`, fullPage: false });
   await page.click('button:has-text("Done")');
   await page.waitForSelector('.signed-banner');
   await page.screenshot({ path: `${OUT}/u5-signed-up.png`, fullPage: true });
+  check('signed-up page lists ticked boxes', (await text(page)).includes('idli, coffee'));
   check('run page shows "You\'re signed up" with their answers', (await text(page)).includes("you're signed up") && (await text(page)).includes('t-shirt size'));
   check('Attend run shown but greyed out', await page.locator('button:has-text("Attend run")').isDisabled());
   check('subtext: activates on run day, scan the QR', (await text(page)).includes('activates on the day of the run. scan the qr at the start line'));
@@ -277,6 +310,7 @@ await run(`${FIX}/qr.y4m`, async (page) => {
   await page.click('text=Change answers');
   await page.waitForSelector('text=Your answers');
   check('change answers: form remembers M', await page.locator('label.option.on:has-text("M")').count() === 1);
+  check('change answers: ticked boxes remembered', (await page.locator('label.option.box.on').count()) === 2);
   await page.click('label.option:has-text("L")'); await page.click('button:has-text("Save answers")');
   await page.waitForSelector("text=You're in."); await page.click('button:has-text("Done")');
   check('answer updated to L', signed['22222222-2222-4222-8222-222222222222:9876500001'].f_size === 'L');
@@ -286,7 +320,8 @@ await run(`${FIX}/qr.y4m`, async (page) => {
   await page.waitForSelector('a:has-text("Sign up")');
   check('cancel removes the sign-up', !signed['22222222-2222-4222-8222-222222222222:9876500001']);
   await page.click('a:has-text("Sign up")'); await page.waitForSelector('text=Signing up as');
-  await page.click('label.option:has-text("L")'); await page.click('button:has-text("Confirm sign-up")');
+  await page.click('label.option:has-text("L")'); await page.click('label.option.box:has-text("Pongal")');
+  await page.click('button:has-text("Confirm sign-up")');
   await page.waitForSelector("text=You're in."); await page.click('button:has-text("Done")');
 
   await page.click('text=‹ Runs'); await page.waitForSelector('.run-card');
@@ -312,6 +347,7 @@ await run(`${FIX}/qr-other.y4m`, async (page) => {
 // ---- Organiser: add a run with poster, QR ----
 await run(`${FIX}/qr.y4m`, async (page) => {
   await login(page, '9876500009');
+  await page.click('.avatar-btn'); await page.waitForSelector('.hero-km');
   check('admin sees Admin link', (await page.locator('a:has-text("Admin")').count()) === 1);
   await page.click('a:has-text("Admin")');
   await page.waitForSelector('text=Add a run');
@@ -345,6 +381,10 @@ await run(`${FIX}/qr.y4m`, async (page) => {
   await page.locator('.q-card .check input').check();
   await page.click('text=+ Add a question');
   await page.fill('input[aria-label="Question 2"]', 'Pace group');
+  await page.click('text=+ Add a question');
+  await page.fill('input[aria-label="Question 3"]', 'Bringing');
+  await page.locator('select[aria-label="Answer type"]').nth(2).selectOption('checkboxes');
+  await page.locator('textarea[placeholder^="S"]').nth(1).fill('Water\nTowel\nFriend');
   await page.screenshot({ path: `${OUT}/a1-form-builder.png`, fullPage: true });
   await page.fill('input[placeholder="5"]', '10');
   await page.click('button:has-text("Publish run")');
@@ -356,7 +396,7 @@ await run(`${FIX}/qr.y4m`, async (page) => {
   const saved = runs.find((r) => r.name === 'Sunday Long Run');
   check('saved with all fields', saved && saved.venue === 'Codissia Grounds' && saved.time === '05:30' && saved.poster_url?.includes('/run-posters/'));
   check('questions saved (choice S/M/L required + short answer), spots 50',
-    saved.capacity === 50 && saved.signup_fields.length === 2 && saved.signup_fields[0].required && saved.signup_fields[0].options.join() === 'S,M,L');
+    saved.capacity === 50 && saved.signup_fields.length === 3 && saved.signup_fields[2].type === 'checkboxes' && saved.signup_fields[2].options.join() === 'Water,Towel,Friend' && saved.signup_fields[0].required && saved.signup_fields[0].options.join() === 'S,M,L');
   const [dl] = await Promise.all([page.waitForEvent('download'), page.click('text=Download QR')]);
   check('QR downloads as an image', /mvmnt-qr-.*\.png/.test(dl.suggestedFilename()));
   await page.click('text=Make a new code'); await page.click('text=Yes, make a new code');

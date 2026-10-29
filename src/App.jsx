@@ -5,6 +5,7 @@ import Login from './Login.jsx';
 import Home from './Home.jsx';
 import Wordmark from './Wordmark.jsx';
 import { RunPage } from './Runs.jsx';
+import Landing from './Landing.jsx';
 
 export default function App() {
   // undefined = still checking for a saved login
@@ -28,11 +29,12 @@ export default function App() {
 
   // Logged out: a run page can be viewed by anyone with the link.
   const [a, b, c] = parts;
+  if (!a) return <Landing profile={null} />;
   if (a === 'run' && b && !c) return <RunPage id={b} profile={null} />;
 
   // Everything else needs a login. After logging in, Home picks up where they were going.
   const next = a === 'login' ? query.get('next') || '' : parts.join('/');
   const runId = next.match(/^run\/([0-9a-f-]{36})/)?.[1];
-  return <Login backHref={runId ? `#/run/${runId}` : null}
+  return <Login backHref={runId ? `#/run/${runId}` : '#/'}
                 note={/\/signup$/.test(next) ? 'Log in to sign up for this run.' : /\/(scan|checkin)/.test(next) ? 'Log in to check in.' : null} />;
 }

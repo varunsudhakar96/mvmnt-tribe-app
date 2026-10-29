@@ -161,10 +161,10 @@ export const adminAddAttendee = (id, phone, km, name) => rpc('admin_add_attendee
 export const adminRemoveAttendee = (id, memberId) => rpc('admin_remove_attendee', { p_id: id, p_member: memberId });
 
 // Shrink big phone photos before upload (max 1600px, JPEG).
-async function shrink(file) {
+async function shrink(file, max = 1600) {
   try {
     const bmp = await createImageBitmap(file);
-    const scale = Math.min(1, 1600 / Math.max(bmp.width, bmp.height));
+    const scale = Math.min(1, max / Math.max(bmp.width, bmp.height));
     const canvas = document.createElement('canvas');
     canvas.width = Math.round(bmp.width * scale);
     canvas.height = Math.round(bmp.height * scale);
@@ -186,6 +186,34 @@ export async function uploadPoster(file) {
     .upload(path, blob, { contentType: type, cacheControl: '31536000', upsert: false });
   if (error) throw new ApiError('upload_failed');
   return supabase.storage.from('run-posters').getPublicUrl(path).data.publicUrl;
+}
+
+// ---- Profile photo ----
+export async function uploadAvatar(file) {
+  const { data } = await supabase.auth.getUser();
+  const uid = data?.user?.id;
+  if (!uid) throw new ApiError('not_logged_in');
+  const blob = await shrink(file, 512);
+  const path = `${uid}/${Date.now()}.jpg`;
+  const { error } = await supabase.storage.from('avatars')
+    .upload(path, blob, { contentType: blob.type || 'image/jpeg', cacheControl: '31536000', upsert: false });
+  if (error) throw new ApiError('upload_failed');
+  const url = supabase.storage.from('avatars').getPublicUrl(path).data.publicUrl;
+  await rpc('set_my_avatar', { p_url: url });
+  return url;
+}
+
+// ---- Share a run ----
+export async function shareRun(run) {
+  const url = `${window.location.origin}${window.location.pathname}#/run/${run.id}`;
+  const when = [runDate(run.date, { weekday: 'short', day: 'numeric', month: 'short' }), runTime(run.time)].filter(Boolean).join(', ');
+  const text = `${run.name}${when ? ` · ${when}` : ''}${run.venue ? ` · ${run.venue}` : ''}. Sign up on the Mvmnt Tribe app:`;
+  if (navigator.share) {
+    try { await navigator.share({ title: run.name, text, url }); return 'shared'; }
+    catch (e) { if (e?.name === 'AbortError') return 'cancelled'; }
+  }
+  try { await navigator.clipboard.writeText(`${text} ${url}`); return 'copied'; }
+  catch { window.prompt('Copy this link', url); return 'copied'; }
 }
 
 // ---- Formatting ----

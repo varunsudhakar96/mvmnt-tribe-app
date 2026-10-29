@@ -1,11 +1,13 @@
 import { Suspense, lazy, useCallback, useEffect, useState } from 'react';
-import { upcomingRuns, runDetail, checkInRun, signUp, cancelSignup, prefill, readScan, messageFor, runDate, runTime, formatPhone } from './api.js';
+import { upcomingRuns, runDetail, checkInRun, shareRun, signUp, cancelSignup, prefill, readScan, messageFor, runDate, runTime, formatPhone } from './api.js';
 import { go, href } from './router.js';
-import Wordmark from './Wordmark.jsx';
 import Badge from './Badge.jsx';
 const Scanner = lazy(() => import('./Scanner.jsx'));
 
 const digits = (p) => String(p || '').replace(/\D/g, '').slice(-10);
+// Checkbox answers are lists; everything else is text.
+export const answerText = (v) => (Array.isArray(v) ? v.join(', ') : String(v ?? ''));
+const isBlank = (v) => (Array.isArray(v) ? v.length === 0 : !String(v ?? '').trim());
 const kmText = (n) => { const v = Number(n || 0); return Number.isInteger(v) ? String(v) : String(+v.toFixed(2)); };
 const when = (r) => [runDate(r.date), runTime(r.time)].filter(Boolean).join(' · ');
 
@@ -87,15 +89,17 @@ export function RunPage({ id, profile }) {
   }
 
   const answered = run?.signed_up
-    ? (run.signup_fields || []).filter((f) => run.my_answers?.[f.id])
+    ? (run.signup_fields || []).filter((f) => !isBlank(run.my_answers?.[f.id]))
     : [];
 
   return (
     <main className="shell has-dock">
       <header className="topbar">
-        {loggedIn
-          ? <a className="link back" href={href('')}>‹ Runs</a>
-          : <><Wordmark small /><a className="link" href={href(`login?next=run/${id}`)}>Log in</a></>}
+        <a className="link back" href={href('')}>‹ Runs</a>
+        <span className="top-actions">
+          {run && <ShareButton run={run} />}
+          {!loggedIn && <a className="link" href={href(`login?next=run/${id}`)}>Log in</a>}
+        </span>
       </header>
 
       {error && <p className="error" role="alert">{error}</p>}
@@ -145,7 +149,7 @@ export function RunPage({ id, profile }) {
                 {answered.length > 0 && (
                   <dl className="confirm-facts">
                     {answered.map((f) => (
-                      <div key={f.id}><dt>{f.label}</dt><dd>{run.my_answers[f.id]}</dd></div>
+                      <div key={f.id}><dt>{f.label}</dt><dd>{answerText(run.my_answers[f.id])}</dd></div>
                     ))}
                   </dl>
                 )}
@@ -170,6 +174,20 @@ export function RunPage({ id, profile }) {
         </article>
       )}
     </main>
+  );
+}
+
+export function ShareButton({ run, className = 'share-btn' }) {
+  const [note, setNote] = useState('');
+  async function share() {
+    const r = await shareRun(run);
+    if (r === 'copied') { setNote('Link copied'); setTimeout(() => setNote(''), 2200); }
+  }
+  return (
+    <button type="button" className={className} onClick={share} aria-label={`Share ${run.name}`}>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 8l5-5 5 5M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6" /></svg>
+      <span>{note || 'Share'}</span>
+    </button>
   );
 }
 
@@ -223,12 +241,14 @@ export function SignupPage({ id, profile }) {
 
   async function submit(e) {
     e.preventDefault();
-    const miss = fields.filter((f) => f.required && !String(answers[f.id] ?? '').trim()).map((f) => f.id);
+    const miss = fields.filter((f) => f.required && isBlank(answers[f.id])).map((f) => f.id);
     setMissing(miss);
     if (miss.length) { setError(messageFor('answer_required')); return; }
     setBusy(true); setError('');
     try {
-      const clean = Object.fromEntries(fields.map((f) => [f.id, String(answers[f.id] ?? '').trim()]).filter(([, v]) => v));
+      const clean = Object.fromEntries(fields
+        .map((f) => [f.id, f.type === 'checkboxes' ? (answers[f.id] || []) : String(answers[f.id] ?? '').trim()])
+        .filter(([, v]) => !isBlank(v)));
       setDone(await signUp(id, clean));
     } catch (err) {
       setError(messageFor(err.code));
@@ -284,6 +304,24 @@ export function SignupPage({ id, profile }) {
 function Question({ f, value, onChange, invalid }) {
   const id = `q-${f.id}`;
   const label = <>{f.label}{f.required && <span className="req"> *</span>}</>;
+  if (f.type === 'checkboxes') {
+    const picked = Array.isArray(value) ? value : [];
+    const toggle = (o) => onChange(picked.includes(o) ? picked.filter((x) => x !== o) : (f.options || []).filter((x) => x === o || picked.includes(x)));
+    return (
+      <fieldset className="field choice" aria-invalid={invalid}>
+        <legend className="label">{label}<span className="hint"> · pick any</span></legend>
+        <div className="options stacked">
+          {(f.options || []).map((o) => (
+            <label key={o} className={`option box${picked.includes(o) ? ' on' : ''}`}>
+              <input type="checkbox" value={o} checked={picked.includes(o)} onChange={() => toggle(o)} />
+              <span><i aria-hidden="true" />{o}</span>
+            </label>
+          ))}
+        </div>
+        {invalid && <span className="error small">Tick at least one.</span>}
+      </fieldset>
+    );
+  }
   if (f.type === 'choice' || f.type === 'yes_no') {
     const opts = f.type === 'yes_no' ? ['Yes', 'No'] : f.options || [];
     return (
