@@ -37,7 +37,7 @@ const MESSAGES = {
   too_many_attempts: 'Too many wrong tries. Ask for a new code.',
   no_account: "This number doesn't have an account yet. Create one first.",
   // runs
-  run_not_found: 'This run is no longer listed.',
+  run_not_found: 'This event is no longer listed.',
   not_today: 'Check-in opens on the day of the run.',
   wrong_code: "This QR code isn't for this run. Scan the code at the start line.",
   no_form: "Check-in isn't set up for this run yet. Let the organiser know.",
@@ -59,6 +59,7 @@ const MESSAGES = {
   answer_not_number: 'Enter a number where it asks for one.',
   answer_bad_choice: 'Pick one of the options given.',
   run_full: 'This run is full.',
+  bad_upi: 'That UPI ID looks wrong. It should look like name@okhdfc.',
   bad_distance: 'Enter a distance between 0.5 and 60 km.',
   name_needed: "That number isn't in the Tribe yet. Add their name too.",
   choice_needs_options: 'Add at least one option to every multiple-choice question.',
@@ -159,6 +160,7 @@ export const runDetail = (id) => rpc('run_detail', { p_id: id });
 export const attendRun = (id, code) => rpc('attend_run', { p_id: id, p_code: code });
 export const signUp = (id, answers) => rpc('sign_up_for_run', { p_id: id, p_answers: answers });
 export const cancelSignup = (id) => rpc('cancel_signup', { p_id: id });
+export const claimPayment = (id) => rpc('claim_payment', { p_id: id });
 export const checkInRun = (id, code, km) => rpc('check_in_run', { p_id: id, p_code: code, p_km: km });
 
 // Google Forms pre-fill: in the form's "Get pre-filled link", type 9999999999 in the phone
@@ -188,6 +190,7 @@ export function readScan(text) {
 // ---- Admin ----
 export const adminListRuns = () => rpc('admin_list_runs');
 export const adminMembers = () => rpc('admin_members');
+export const adminSetPayment = (id, memberId, status) => rpc('admin_set_payment', { p_id: id, p_member: memberId, p_status: status });
 export const adminSaveRun = (run) => rpc('admin_save_run', { p: run });
 export const adminDeleteRun = (id) => rpc('admin_delete_run', { p_id: id });
 export const adminNewQr = (id) => rpc('admin_new_qr', { p_id: id });

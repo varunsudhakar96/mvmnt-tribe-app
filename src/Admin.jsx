@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import {
-  adminListRuns, adminMembers, adminSaveRun, adminDeleteRun, adminNewQr, adminAddAttendee, adminRemoveAttendee, uploadPoster, normalisePhone,
+  adminListRuns, adminMembers, adminSetPayment, adminSaveRun, adminDeleteRun, adminNewQr, adminAddAttendee, adminRemoveAttendee, uploadPoster, normalisePhone,
   checkinLink, messageFor, runDate, runTime,
 } from './api.js';
 import { go, href } from './router.js';
@@ -23,7 +23,7 @@ function AdminBar({ back = '', label = '‹ Home' }) {
 function AdminTabs({ active }) {
   return (
     <nav className="tabs" aria-label="Admin sections">
-      <a className={active === 'runs' ? 'on' : ''} href={href('admin')} aria-current={active === 'runs' ? 'page' : undefined}>Runs</a>
+      <a className={active === 'runs' ? 'on' : ''} href={href('admin')} aria-current={active === 'runs' ? 'page' : undefined}>Events</a>
       <a className={active === 'members' ? 'on' : ''} href={href('admin/members')} aria-current={active === 'members' ? 'page' : undefined}>Members</a>
     </nav>
   );
@@ -185,13 +185,13 @@ export function AdminRuns() {
       <AdminBar />
       <AdminTabs active="runs" />
       <div className="stack">
-        <h1 className="display">Runs</h1>
-        <a className="btn" href={href('admin/run/new')}>Add a run</a>
+        <h1 className="display">Events</h1>
+        <a className="btn" href={href('admin/run/new')}>Add an event</a>
         {error && <p className="error" role="alert">{error}</p>}
         {!error && runs === undefined && <p className="muted">Loading…</p>}
         {runs && (
           <>
-            <AdminGroup title="Upcoming" runs={upcoming} empty="Nothing scheduled. Add the next run." />
+            <AdminGroup title="Upcoming" runs={upcoming} empty="Nothing scheduled. Add the next one." />
             {past.length > 0 && <AdminGroup title="Past" runs={past.slice(0, 12)} />}
           </>
         )}
@@ -217,8 +217,9 @@ function AdminGroup({ title, runs, empty }) {
               </span>
               <span className="flags">
                 {r.is_today && <span className="today">Today</span>}
+                <span className="kind-tag">{r.kind === 'event' ? 'Event' : 'Run'}</span>
                 {r.signup_count > 0 && <span className="count">{r.signup_count} signed up</span>}
-                {r.attendees?.length > 0 && <span className="count">{r.attendees.length} ran</span>}
+                {r.attendees?.length > 0 && <span className="count">{r.attendees.length} checked in</span>}
               </span>
             </a>
           </li>
@@ -229,10 +230,11 @@ function AdminGroup({ title, runs, empty }) {
 }
 
 // ---------- Add / edit ----------
-const EMPTY = { name: '', date: '', time: '06:00', venue: '', map_url: '', description: '', run_km: '5', poster_url: '',
-  signup_enabled: true, signup_fields: [], capacity: '' };
+const EMPTY = { kind: 'run', name: '', date: '', time: '06:00', venue: '', map_url: '', description: '', run_km: '5', poster_url: '',
+  signup_enabled: true, signup_fields: [], capacity: '', price: '', payment_qr_url: '', upi_id: '' };
 const LAST_FIELDS = 'mvmnt.lastSignupFields';
 const lastFields = () => { try { return JSON.parse(recall(LAST_FIELDS) || '[]').map((f) => ({ ...f, id: newId() })); } catch { return []; } };
+const rupees = (n) => `₹${Number(n || 0).toLocaleString('en-IN')}`;
 const newId = () => `f_${Math.random().toString(36).slice(2, 10)}`;
 
 export function AdminRunEdit({ id }) {
@@ -244,6 +246,9 @@ export function AdminRunEdit({ id }) {
   const [notice, setNotice] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(false);
   const fileRef = useRef(null);
+  const payRef = useRef(null);
+  const isEvent = form?.kind === 'event';
+  const noun = isEvent ? 'event' : 'run';
 
   useEffect(() => {
     if (isNew) return;
@@ -252,7 +257,8 @@ export function AdminRunEdit({ id }) {
         const r = all.find((x) => x.id === id);
         if (!r) { setError(messageFor('run_not_found')); return; }
         setSaved(r);
-        setForm({ ...EMPTY, ...Object.fromEntries(Object.keys(EMPTY).map((k) => [k, r[k] ?? ''])) });
+        setForm({ ...EMPTY, ...Object.fromEntries(Object.keys(EMPTY).map((k) => [k, r[k] ?? ''])),
+                  price: r.price ? String(r.price) : '', kind: r.kind || 'run' });
       })
       .catch((e) => setError(messageFor(e.code)));
   }, [id, isNew]);
@@ -272,6 +278,16 @@ export function AdminRunEdit({ id }) {
     } finally {
       setBusy('');
     }
+  }
+
+  async function pickPayQr(e) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setError(''); setBusy('payqr');
+    try { const url = await uploadPoster(file); setForm((f) => ({ ...f, payment_qr_url: url })); }
+    catch (err) { setError(messageFor(err.code)); }
+    finally { setBusy(''); }
   }
 
   async function save(e) {
@@ -300,7 +316,7 @@ export function AdminRunEdit({ id }) {
   if (!form) {
     return (
       <main className="shell">
-        <AdminBar back="admin" label="‹ Runs" />
+        <AdminBar back="admin" label="‹ Events" />
         {error ? <p className="error" role="alert">{error}</p> : <p className="muted">Loading…</p>}
       </main>
     );
@@ -308,20 +324,33 @@ export function AdminRunEdit({ id }) {
 
   return (
     <main className="shell">
-      <AdminBar back="admin" label="‹ Runs" />
+      <AdminBar back="admin" label="‹ Events" />
       <form className="stack" onSubmit={save} noValidate>
         <div className="title-row">
-          <h1 className="display">{isNew ? 'New run' : 'Edit run'}</h1>
+          <h1 className="display">{isNew ? `New ${noun}` : `Edit ${noun}`}</h1>
           {!isNew && saved && <ShareButton run={saved} />}
         </div>
+
+        <fieldset className="field type-pick">
+          <legend className="label">What is it?</legend>
+          <div className="seg two-seg" role="radiogroup">
+            <button type="button" role="radio" aria-checked={!isEvent} className={!isEvent ? 'on' : ''}
+                    onClick={() => setForm((f) => ({ ...f, kind: 'run' }))}>Run</button>
+            <button type="button" role="radio" aria-checked={isEvent} className={isEvent ? 'on' : ''}
+                    onClick={() => setForm((f) => ({ ...f, kind: 'event' }))}>Event</button>
+          </div>
+          <span className="hint">{isEvent
+            ? 'Workshops, socials, anything else. Check-in records attendance; no km.'
+            : 'Check-ins log km toward runners\' totals and badges.'}</span>
+        </fieldset>
 
         <div className="field">
           <span className="label">Poster</span>
           <button type="button" className={`poster-pick${form.poster_url ? ' has' : ''}`}
                   onClick={() => fileRef.current?.click()} disabled={busy === 'poster'}>
             {form.poster_url
-              ? <img src={form.poster_url} alt="Run poster" />
-              : <span>{busy === 'poster' ? 'Uploading…' : 'Add the run poster'}</span>}
+              ? <img src={form.poster_url} alt="Poster" />
+              : <span>{busy === 'poster' ? 'Uploading…' : 'Add a poster or photo'}</span>}
           </button>
           <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" hidden onChange={pickPoster} />
           {form.poster_url && (
@@ -336,8 +365,8 @@ export function AdminRunEdit({ id }) {
           )}
         </div>
 
-        <Field label="Run name" required>
-          <input className="input" value={form.name} onChange={set('name')} placeholder="Saturday 5K" required />
+        <Field label="Title" required>
+          <input className="input" value={form.name} onChange={set('name')} placeholder={isEvent ? 'Mudgar Workshop' : 'Saturday 5K'} required />
         </Field>
         <div className="two">
           <Field label="Date" required>
@@ -353,31 +382,64 @@ export function AdminRunEdit({ id }) {
         <Field label="Location link" hint="Paste the Google Maps share link.">
           <input className="input" type="url" inputMode="url" value={form.map_url} onChange={set('map_url')} placeholder="https://maps.app.goo.gl/…" />
         </Field>
-        <Field label="Details" hint="Optional: route, distance, what to bring.">
+        <Field label="Details" hint={isEvent ? 'Optional: what happens, who it is for, what to bring.' : 'Optional: route, distance, what to bring.'}>
           <textarea className="input area" rows={3} value={form.description} onChange={set('description')} />
         </Field>
         <SignupBuilder form={form} setForm={setForm} hasSignups={(saved?.signup_count || 0) > 0} />
 
-        <Field label="Distance (km)" hint="What a QR check-in logs by default. Runners can change it if they ran more or less.">
-          <input className="input" inputMode="decimal" value={form.run_km ?? ''} placeholder="5"
-                 onChange={(e) => setForm((f) => ({ ...f, run_km: e.target.value.replace(/[^0-9.]/g, '').slice(0, 5) }))} />
-        </Field>
+        {!isEvent && (
+          <Field label="Distance (km)" hint="What a QR check-in logs by default. Runners can change it if they ran more or less.">
+            <input className="input" inputMode="decimal" value={form.run_km ?? ''} placeholder="5"
+                   onChange={(e) => setForm((f) => ({ ...f, run_km: e.target.value.replace(/[^0-9.]/g, '').slice(0, 5) }))} />
+          </Field>
+        )}
+
+        <section className="builder" aria-labelledby="pay-h">
+          <h2 className="section-title" id="pay-h">Payment</h2>
+          <Field label="Price (₹)" hint="Leave empty for free. When there's a price, people see the payment QR after signing up.">
+            <input className="input" inputMode="numeric" value={form.price ?? ''} placeholder="Free"
+                   onChange={(e) => setForm((f) => ({ ...f, price: e.target.value.replace(/\D/g, '').slice(0, 6) }))} />
+          </Field>
+          {Number(form.price) > 0 && (
+            <>
+              <div className="field">
+                <span className="label">Payment QR</span>
+                <button type="button" className={`poster-pick qr-pick${form.payment_qr_url ? ' has' : ''}`}
+                        onClick={() => payRef.current?.click()} disabled={busy === 'payqr'}>
+                  {form.payment_qr_url
+                    ? <img src={form.payment_qr_url} alt="Payment QR" />
+                    : <span>{busy === 'payqr' ? 'Uploading…' : 'Add your UPI QR image'}</span>}
+                </button>
+                <input ref={payRef} type="file" accept="image/jpeg,image/png,image/webp" hidden onChange={pickPayQr} />
+                {form.payment_qr_url && (
+                  <div className="row">
+                    <button type="button" className="link inline" onClick={() => payRef.current?.click()}>Change QR</button>
+                    <button type="button" className="link inline" onClick={() => setForm((f) => ({ ...f, payment_qr_url: '' }))}>Remove</button>
+                  </div>
+                )}
+              </div>
+              <Field label="UPI ID" hint="Recommended. People view the QR on their own phone, so they can't scan it; this gives them a Pay with UPI app button.">
+                <input className="input" value={form.upi_id ?? ''} onChange={set('upi_id')} placeholder="mvmnttribe@okhdfc" autoCapitalize="off" autoCorrect="off" />
+              </Field>
+            </>
+          )}
+        </section>
 
         {error && <p className="error" role="alert">{error}</p>}
         {notice && !error && <p className="saved" role="status">{notice}</p>}
         <button className="btn" type="submit" disabled={!!busy}>
-          {busy === 'save' ? 'Saving…' : isNew ? 'Publish run' : 'Save changes'}
+          {busy === 'save' ? 'Saving…' : isNew ? `Publish ${noun}` : 'Save changes'}
         </button>
       </form>
 
       {!isNew && saved && <Attendance run={saved} onChange={setSaved} />}
-      {!isNew && saved && <Signups run={saved} />}
+      {!isNew && saved && <Signups run={saved} onChange={setSaved} />}
       {!isNew && saved && <VenueQr run={saved} onChange={setSaved} />}
 
       {!isNew && (
         <section className="danger-zone">
           {!confirmDelete ? (
-            <button className="link" onClick={() => setConfirmDelete(true)}>Delete this run</button>
+            <button className="link" onClick={() => setConfirmDelete(true)}>Delete this {noun}</button>
           ) : (
             <div className="stack">
               <p className="muted">Remove “{form.name}” from the app? Members won't see it any more.</p>
@@ -520,7 +582,7 @@ function Attendance({ run, onChange }) {
   return (
     <section className="signups" aria-labelledby="att-title">
       <h2 className="section-title" id="att-title">Checked in · {list.length}</h2>
-      {list.length === 0 && <p className="muted">{run.is_past || run.is_today ? 'Nobody has checked in.' : 'Check-ins open on run day.'}</p>}
+      {list.length === 0 && <p className="muted">{run.is_past || run.is_today ? 'Nobody has checked in.' : 'Check-ins open on the day.'}</p>}
       {list.length > 0 && (
         <ol className="su-list">
           {list.map((p) => (
@@ -528,7 +590,7 @@ function Attendance({ run, onChange }) {
               <div className="su-row">
                 <span>{p.name}{p.by === 'admin check-in' && <span className="muted"> · added by you</span>}</span>
                 <span className="att-right">
-                  <strong className="tabular">{Number(p.km)} km</strong>
+                  {p.km != null && <strong className="tabular">{Number(p.km)} km</strong>}
                   <button className="link inline" onClick={() => remove(p.member_id)} disabled={busy === p.member_id}
                           aria-label={`Remove ${p.name}`}>Remove</button>
                 </span>
@@ -552,12 +614,14 @@ function Attendance({ run, onChange }) {
               <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
             </label>
           )}
-          <label className="field">
-            <span className="label">Distance (km)</span>
-            <input className="input" inputMode="decimal" value={km} placeholder={String(run.run_km ?? 5)}
-                   onChange={(e) => setKm(e.target.value.replace(/[^0-9.]/g, '').slice(0, 5))} />
-          </label>
-          <button className="btn" type="submit" disabled={busy === 'add'}>{busy === 'add' ? 'Adding…' : 'Add to this run'}</button>
+          {run.kind !== 'event' && (
+            <label className="field">
+              <span className="label">Distance (km)</span>
+              <input className="input" inputMode="decimal" value={km} placeholder={String(run.run_km ?? 5)}
+                     onChange={(e) => setKm(e.target.value.replace(/[^0-9.]/g, '').slice(0, 5))} />
+            </label>
+          )}
+          <button className="btn" type="submit" disabled={busy === 'add'}>{busy === 'add' ? 'Adding…' : 'Check them in'}</button>
           <button type="button" className="link" onClick={() => { setAdding(false); setError(''); setNeedName(false); }}>Cancel</button>
         </form>
       )}
@@ -567,15 +631,28 @@ function Attendance({ run, onChange }) {
 }
 
 // ---------- Who has signed up ----------
-function Signups({ run }) {
+const PAY_LABEL = { none: 'Not paid', claimed: 'Says paid', confirmed: 'Paid' };
+
+function Signups({ run, onChange }) {
   const list = run.signups || [];
   const fields = run.signup_fields || [];
+  const paid = run.price > 0;
+  const [busy, setBusy] = useState('');
+  const [error, setError] = useState('');
+  async function setPay(memberId, status) {
+    setBusy(memberId); setError('');
+    try { onChange(await adminSetPayment(run.id, memberId, status)); } catch (e) { setError(messageFor(e.code)); } finally { setBusy(''); }
+  }
+  const counts = paid ? list.reduce((c, p) => ({ ...c, [p.payment || 'none']: (c[p.payment || 'none'] || 0) + 1 }), {}) : {};
 
   function downloadCsv() {
     const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
     const ran = Object.fromEntries((run.attendees || []).map((a) => [a.phone, a.km]));
-    const head = ['Name', 'Number', 'Signed up at', 'Checked in (km)', ...fields.map((f) => f.label)];
-    const rows = list.map((p) => [p.name, p.phone, new Date(p.at).toLocaleString('en-IN'), ran[p.phone] ?? '', ...fields.map((f) => answerText(p.answers?.[f.id]))]);
+    const checked = new Set((run.attendees || []).map((a) => a.phone));
+    const head = ['Name', 'Number', 'Signed up at', run.kind === 'event' ? 'Checked in' : 'Checked in (km)', ...(paid ? ['Payment'] : []), ...fields.map((f) => f.label)];
+    const rows = list.map((p) => [p.name, p.phone, new Date(p.at).toLocaleString('en-IN'),
+      run.kind === 'event' ? (checked.has(p.phone) ? 'Yes' : '') : (ran[p.phone] ?? ''),
+      ...(paid ? [PAY_LABEL[p.payment || 'none']] : []), ...fields.map((f) => answerText(p.answers?.[f.id]))]);
     const csv = [head, ...rows].map((r) => r.map(esc).join(',')).join('\n');
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv' }));
@@ -588,6 +665,9 @@ function Signups({ run }) {
       <h2 className="section-title" id="su-title">
         Signed up · {list.length}{run.capacity != null ? ` of ${run.capacity}` : ''}
       </h2>
+      {paid && list.length > 0 && (
+        <p className="hint">{rupees(run.price)} each · {counts.confirmed || 0} paid · {counts.claimed || 0} say paid · {counts.none || 0} not paid</p>
+      )}
       {list.length === 0 ? (
         <p className="muted">{run.signup_enabled ? 'No sign-ups yet.' : 'Sign-ups are closed.'}</p>
       ) : (
@@ -596,6 +676,14 @@ function Signups({ run }) {
             {list.map((p, i) => (
               <li key={`${p.phone}-${i}`}>
                 <div className="su-row"><span>{p.name}</span><span className="muted">{p.phone}</span></div>
+                {paid && (
+                  <div className="pay-row">
+                    <span className={`pay-chip pay-${p.payment || 'none'}`}>{PAY_LABEL[p.payment || 'none']}</span>
+                    {(p.payment || 'none') !== 'confirmed'
+                      ? <button className="link inline" disabled={busy === p.member_id} onClick={() => setPay(p.member_id, 'confirmed')}>Mark paid</button>
+                      : <button className="link inline" disabled={busy === p.member_id} onClick={() => setPay(p.member_id, 'none')}>Undo</button>}
+                  </div>
+                )}
                 {fields.some((f) => answerText(p.answers?.[f.id])) && (
                   <div className="su-answers">
                     {fields.filter((f) => answerText(p.answers?.[f.id])).map((f) => (
@@ -609,6 +697,7 @@ function Signups({ run }) {
           <button className="btn ghost" onClick={downloadCsv}>Download list (CSV)</button>
         </>
       )}
+      {error && <p className="error" role="alert">{error}</p>}
     </section>
   );
 }
@@ -661,7 +750,7 @@ function VenueQr({ run, onChange }) {
   return (
     <section className="qr-card" aria-labelledby="qr-title">
       <h2 className="section-title" id="qr-title">Venue QR</h2>
-      <p className="muted">Print this and keep it at the start line. Runners scan it in the app to log the run. It only works on run day, and only for this run.</p>
+      <p className="muted">Print this and keep it at the venue. People scan it in the app to check in. It only works on the day, and only for this one.</p>
       {local && <p className="flag-note">You're on a test copy. Make the QR from the live site so it points to the right address.</p>}
       {src && <img className="qr" src={src} alt="Check-in QR code for this run" />}
       <button className="btn" onClick={download} disabled={!src}>Download QR</button>

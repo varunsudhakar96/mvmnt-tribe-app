@@ -20,7 +20,7 @@ export default function Landing({ profile }) {
 
       <section className="hero" aria-label="Mvmnt Tribe">
         <h1 className="hero-quote">Let's get<br />stronger<br />together.</h1>
-        <p className="lede">Weekend runs in Coimbatore. Sign up, show up, scan in at the start line.</p>
+        <p className="lede">Weekend runs and events in Coimbatore. Sign up, show up, scan in.</p>
       </section>
 
       <UpcomingRuns />
