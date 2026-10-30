@@ -7,6 +7,7 @@ import { RunPage, ScanPage, CheckInPage, SignupPage } from './Runs.jsx';
 import Landing from './Landing.jsx';
 import Avatar from './Avatar.jsx';
 const AdminRuns = lazy(() => import('./Admin.jsx').then((m) => ({ default: m.AdminRuns })));
+const AdminMembers = lazy(() => import('./Admin.jsx').then((m) => ({ default: m.AdminMembers })));
 const AdminRunEdit = lazy(() => import('./Admin.jsx').then((m) => ({ default: m.AdminRunEdit })));
 const Wait = ({ children }) => (
   <Suspense fallback={<main className="shell"><p className="muted">Loading…</p></main>}>{children}</Suspense>
@@ -58,6 +59,7 @@ export default function Home() {
     if (a === 'admin') {
       if (!profile.is_admin) return <NotAllowed />;
       if (b === 'run' && c) return <Wait><AdminRunEdit id={c} /></Wait>;
+      if (b === 'members') return <Wait><AdminMembers /></Wait>;
       return <Wait><AdminRuns /></Wait>;
     }
     if (a !== 'me') return <Landing profile={profile} />;

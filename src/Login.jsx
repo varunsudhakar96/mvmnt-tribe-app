@@ -1,9 +1,12 @@
 import { useRef, useState } from 'react';
-import { checkPhone, createAccount, logIn, normalisePhone, formatPhone, messageFor } from './api.js';
+import { useEffect } from 'react';
+import { checkPhone, createAccount, logIn, sendCode, verifyCode, normalisePhone, formatPhone, messageFor } from './api.js';
 import { ADMIN_WHATSAPP } from './config.js';
 import Wordmark from './Wordmark.jsx';
 
-// Steps: 'phone' -> 'password' (has an account) or 'create' (member without one, or new)
+// Steps: 'phone' -> 'password' (has an account) or 'create' (member without one, or new).
+// With WhatsApp codes on: 'create' -> 'code' (verify the number), and 'password' offers a code
+// login or a self-service reset, both through 'code'.
 export default function Login({ backHref = null, note = null }) {
   const [step, setStep] = useState('phone');
   const [digits, setDigits] = useState('');
@@ -15,7 +18,19 @@ export default function Login({ backHref = null, note = null }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [forgotOpen, setForgotOpen] = useState(false);
+  const [otp, setOtp] = useState(false);
+  const [purpose, setPurpose] = useState(null);
+  const [code, setCode] = useState('');
+  const [resendIn, setResendIn] = useState(0);
+  const [info, setInfo] = useState('');
   const passwordRef = useRef(null);
+  const codeRef = useRef(null);
+
+  useEffect(() => {
+    if (resendIn <= 0) return undefined;
+    const t = setTimeout(() => setResendIn((n) => n - 1), 1000);
+    return () => clearTimeout(t);
+  }, [resendIn]);
 
   const phone = normalisePhone(digits);
 
@@ -48,8 +63,9 @@ export default function Login({ backHref = null, note = null }) {
     e.preventDefault();
     if (!phone) return setError(messageFor('invalid_phone'));
     run(async () => {
-      const s = await checkPhone(phone);
+      const { status: s, otp: on } = await checkPhone(phone);
       setStatus(s);
+      setOtp(on);
       setStep(s === 'has_account' ? 'password' : 'create');
       setTimeout(() => passwordRef.current?.focus(), 50);
     });
@@ -66,7 +82,46 @@ export default function Login({ backHref = null, note = null }) {
     if (status === 'new' && name.trim().length < 2) return setError(messageFor('name_required'));
     if (password.length < 6) return setError(messageFor('password_too_short'));
     if (password !== confirm) return setError("Those passwords don't match.");
+    if (otp) return run(() => startCode('signup'));
     run(() => createAccount({ phone, password, name: status === 'new' ? name : undefined }));
+  };
+
+  async function startCode(p) {
+    await sendCode(phone, p);
+    setPurpose(p);
+    setCode('');
+    if (p === 'reset') { setPassword(''); setConfirm(''); }
+    setResendIn(30);
+    setInfo('');
+    setStep('code');
+    setTimeout(() => codeRef.current?.focus(), 50);
+  }
+
+  const resend = () => run(async () => {
+    await sendCode(phone, purpose);
+    setResendIn(30);
+    setCode('');
+    setInfo('New code sent.');
+  });
+
+  const submitCode = (e) => {
+    e.preventDefault();
+    if (code.length !== 6) return setError('Enter the 6-digit code.');
+    if (purpose === 'reset') {
+      if (password.length < 6) return setError(messageFor('password_too_short'));
+      if (password !== confirm) return setError("Those passwords don't match.");
+    }
+    run(async () => {
+      try {
+        await verifyCode({ phone, purpose, code, password, name: status === 'new' ? name : undefined });
+      } catch (err) {
+        if (err.code === 'wrong_otp' && err.triesLeft != null) {
+          setCode('');
+          throw Object.assign(err, { code: err.triesLeft > 0 ? 'wrong_otp' : 'too_many_attempts' });
+        }
+        throw err;
+      }
+    });
   };
 
   function changeNumber() {
@@ -75,6 +130,8 @@ export default function Login({ backHref = null, note = null }) {
     setConfirm('');
     setError('');
     setForgotOpen(false);
+    setCode('');
+    setPurpose(null);
   }
 
   return (
@@ -141,10 +198,24 @@ export default function Login({ backHref = null, note = null }) {
             {busy ? 'Logging in…' : 'Log in'}
           </button>
 
-          <button type="button" className="link" onClick={() => setForgotOpen((o) => !o)} aria-expanded={forgotOpen}>
-            Forgot password?
-          </button>
-          {forgotOpen && <ForgotNote phone={phone} />}
+          {otp ? (
+            <>
+              <div className="or-line"><span>or</span></div>
+              <button type="button" className="btn ghost" disabled={busy} onClick={() => run(() => startCode('login'))}>
+                Send me a WhatsApp code
+              </button>
+              <button type="button" className="link" disabled={busy} onClick={() => run(() => startCode('reset'))}>
+                Forgot password? Reset it with a code
+              </button>
+            </>
+          ) : (
+            <>
+              <button type="button" className="link" onClick={() => setForgotOpen((o) => !o)} aria-expanded={forgotOpen}>
+                Forgot password?
+              </button>
+              {forgotOpen && <ForgotNote phone={phone} />}
+            </>
+          )}
         </form>
       )}
 
@@ -201,8 +272,54 @@ export default function Login({ backHref = null, note = null }) {
 
           {error && <p className="error" role="alert">{error}</p>}
           <button className="btn" type="submit" disabled={busy}>
-            {busy ? 'Creating your account…' : 'Create account'}
+            {busy ? (otp ? 'Sending code…' : 'Creating your account…') : (otp ? 'Send WhatsApp code' : 'Create account')}
           </button>
+          {otp && <p className="hint center">We'll send a code to this number on WhatsApp to confirm it's yours.</p>}
+        </form>
+      )}
+
+      {step === 'code' && (
+        <form className="stack" onSubmit={submitCode} noValidate>
+          <div>
+            <h1 className="display">{purpose === 'reset' ? 'Reset your password.' : 'Check WhatsApp.'}</h1>
+            <p className="lede">We sent a 6-digit code to <strong>+91 {formatPhone(phone)}</strong>. It works for 5 minutes.</p>
+          </div>
+          <div className="field">
+            <label htmlFor="otp">Code</label>
+            <input
+              id="otp"
+              ref={codeRef}
+              className="input otp-input"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              placeholder="••••••"
+              maxLength={6}
+              value={code}
+              onChange={(e) => { setCode(e.target.value.replace(/\D/g, '').slice(0, 6)); setError(''); setInfo(''); }}
+            />
+          </div>
+          {purpose === 'reset' && (
+            <>
+              <PasswordField id="reset-password" label="New password" hint="At least 6 characters." value={password}
+                onChange={(v) => { setPassword(v); setError(''); }} show={showPassword}
+                onToggle={() => setShowPassword((x) => !x)} autoComplete="new-password" />
+              <PasswordField id="reset-confirm" label="Type it again" value={confirm}
+                onChange={(v) => { setConfirm(v); setError(''); }} show={showPassword} autoComplete="new-password" />
+            </>
+          )}
+          {error && <p className="error" role="alert">{error}</p>}
+          {info && !error && <p className="saved" role="status">{info}</p>}
+          <button className="btn" type="submit" disabled={busy || code.length !== 6}>
+            {busy ? 'Checking…' : purpose === 'signup' ? 'Confirm and create account' : purpose === 'reset' ? 'Set new password' : 'Log in'}
+          </button>
+          <div className="row center-row">
+            <button type="button" className="link inline" onClick={resend} disabled={busy || resendIn > 0}>
+              {resendIn > 0 ? `Resend code in ${resendIn}s` : 'Resend code'}
+            </button>
+            <button type="button" className="link inline" onClick={() => { setStep(purpose === 'signup' ? 'create' : 'password'); setError(''); }}>
+              Back
+            </button>
+          </div>
         </form>
       )}
     </main>

@@ -600,3 +600,27 @@ select.input { appearance: none; background-image: linear-gradient(45deg, transp
 }
 .share-btn svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .title-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+
+/* ---- WhatsApp codes ---- */
+.otp-input { height: 72px; text-align: center; font-family: var(--display); font-weight: 800; font-size: 40px; letter-spacing: 0.4em; font-variant-numeric: tabular-nums; padding-left: 0.4em; }
+.or-line { display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 14px; }
+.or-line::before, .or-line::after { content: ''; flex: 1; height: 1px; background: var(--line); }
+.center-row { justify-content: center; gap: 18px; }
+
+/* ---- Admin: tabs + members ---- */
+.tabs { display: flex; gap: 6px; margin: -18px 0 22px; border-bottom: 1px solid var(--line); }
+.tabs a { padding: 10px 4px; margin-right: 14px; color: var(--muted); text-decoration: none; font-family: var(--display); font-weight: 800; font-size: 18px; letter-spacing: 0.06em; text-transform: uppercase; border-bottom: 3px solid transparent; margin-bottom: -1px; }
+.tabs a.on { color: var(--ink); border-bottom-color: var(--ink); }
+.tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.tiles div { padding: 14px; border: 1px solid var(--line); border-radius: 14px; display: flex; flex-direction: column; gap: 2px; }
+.tiles dt { font-size: 13px; color: var(--muted); }
+.tiles dd { font-family: var(--display); font-weight: 900; font-size: 40px; line-height: 1; font-variant-numeric: tabular-nums; }
+.tiles span { font-size: 13px; color: var(--muted); }
+.bar.big { height: 8px; }
+.seg { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 4px; background: var(--field); border: 1px solid var(--line); border-radius: 12px; }
+.seg button { height: 40px; border-radius: 9px; font-weight: 600; font-size: 15px; color: var(--muted); }
+.seg button.on { background: var(--ink); color: var(--bg); }
+.stack.tight { gap: 12px; }
+.btn.half { flex: 1; font-size: 15px; height: 46px; }
+.check-card { padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; display: flex; flex-direction: column; gap: 6px; }
+.pill-mini { margin-left: 6px; font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 6px; background: var(--ink); color: var(--bg); vertical-align: 2px; }

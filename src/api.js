@@ -26,6 +26,16 @@ const MESSAGES = {
   invalid_credentials: "That password isn't right. Try again, or tap Forgot password.",
   network: "Couldn't reach Mvmnt Tribe. Check your connection and try again.",
   server_error: 'Something went wrong on our side. Try again in a minute.',
+  // WhatsApp codes
+  code_required: 'Confirm your number with a WhatsApp code first.',
+  otp_not_ready: "WhatsApp codes aren't switched on yet. Use your password.",
+  wait_before_resend: 'Give it a few seconds before asking for another code.',
+  too_many_codes: 'Too many codes asked for this number. Try again in an hour.',
+  send_failed: "We couldn't send the code on WhatsApp. Try again in a minute.",
+  wrong_otp: "That code isn't right. Check WhatsApp and try again.",
+  code_expired: 'That code has expired. Ask for a new one.',
+  too_many_attempts: 'Too many wrong tries. Ask for a new code.',
+  no_account: "This number doesn't have an account yet. Create one first.",
   // runs
   run_not_found: 'This run is no longer listed.',
   not_today: 'Check-in opens on the day of the run.',
@@ -56,7 +66,7 @@ const MESSAGES = {
 export const messageFor = (code) => MESSAGES[code] ?? MESSAGES.server_error;
 
 class ApiError extends Error {
-  constructor(code) { super(code); this.code = code; }
+  constructor(code, extra = {}) { super(code); this.code = code; Object.assign(this, extra); }
 }
 
 async function memberAuth(payload) {
@@ -71,13 +81,36 @@ async function memberAuth(payload) {
     throw new ApiError('network');
   }
   const body = await res.json().catch(() => ({}));
-  if (!res.ok || body.ok === false) throw new ApiError(body.error ?? 'server_error');
+  if (!res.ok || body.ok === false) throw new ApiError(body.error ?? 'server_error', { triesLeft: body.tries_left });
   return body;
 }
 
-// 'has_account' | 'member' | 'new'
+// status: 'has_account' | 'member' | 'new'; otp: WhatsApp codes are switched on
 export async function checkPhone(phone) {
-  return (await memberAuth({ action: 'status', phone })).status;
+  const r = await memberAuth({ action: 'status', phone });
+  return { status: r.status, otp: Boolean(r.otp) };
+}
+
+// ---- WhatsApp codes ----
+export async function sendCode(phone, purpose) {
+  return (await memberAuth({ action: 'send_code', phone, purpose })).sent_to;
+}
+
+// signup: creates the account; reset: sets a new password; login: no password needed.
+export async function verifyCode({ phone, purpose, code, password, name }) {
+  let r;
+  try {
+    r = await memberAuth({ action: 'verify_code', phone, purpose, code, password, name });
+  } catch (e) {
+    if (e.code === 'wrong_code') throw new ApiError('wrong_otp', { triesLeft: e.triesLeft });
+    throw e;
+  }
+  if (purpose === 'login') {
+    const { data, error } = await supabase.auth.verifyOtp({ token_hash: r.token_hash, type: 'magiclink' });
+    if (error) throw new ApiError('code_expired');
+    return data.session;
+  }
+  return logIn({ phone, password });
 }
 
 export async function createAccount({ phone, password, name }) {
@@ -154,6 +187,7 @@ export function readScan(text) {
 
 // ---- Admin ----
 export const adminListRuns = () => rpc('admin_list_runs');
+export const adminMembers = () => rpc('admin_members');
 export const adminSaveRun = (run) => rpc('admin_save_run', { p: run });
 export const adminDeleteRun = (id) => rpc('admin_delete_run', { p_id: id });
 export const adminNewQr = (id) => rpc('admin_new_qr', { p_id: id });

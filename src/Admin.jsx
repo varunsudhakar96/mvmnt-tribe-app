@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import {
-  adminListRuns, adminSaveRun, adminDeleteRun, adminNewQr, adminAddAttendee, adminRemoveAttendee, uploadPoster, normalisePhone,
+  adminListRuns, adminMembers, adminSaveRun, adminDeleteRun, adminNewQr, adminAddAttendee, adminRemoveAttendee, uploadPoster, normalisePhone,
   checkinLink, messageFor, runDate, runTime,
 } from './api.js';
 import { go, href } from './router.js';
@@ -17,6 +17,152 @@ function AdminBar({ back = '', label = '‹ Home' }) {
       <a className="link back" href={href(back)}>{label}</a>
       <span className="admin-tag">Organiser</span>
     </header>
+  );
+}
+
+function AdminTabs({ active }) {
+  return (
+    <nav className="tabs" aria-label="Admin sections">
+      <a className={active === 'runs' ? 'on' : ''} href={href('admin')} aria-current={active === 'runs' ? 'page' : undefined}>Runs</a>
+      <a className={active === 'members' ? 'on' : ''} href={href('admin/members')} aria-current={active === 'members' ? 'page' : undefined}>Members</a>
+    </nav>
+  );
+}
+
+// ---------- Members ----------
+const ago = (iso) => {
+  if (!iso) return '—';
+  const d = Math.floor((Date.now() - new Date(iso)) / 864e5);
+  return d <= 0 ? 'today' : d === 1 ? 'yesterday' : d < 30 ? `${d} days ago` : new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+};
+const dayMonth = (iso) => (iso ? new Date(`${String(iso).slice(0, 10)}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '—');
+const fmtPhone = (p) => (/^\d{10}$/.test(p || '') ? `${p.slice(0, 5)} ${p.slice(5)}` : String(p || '').replace(/^name:/, 'no number · '));
+
+export function AdminMembers() {
+  const [data, setData] = useState(undefined);
+  const [error, setError] = useState('');
+  const [view, setView] = useState('not_joined');
+  const [q, setQ] = useState('');
+  const [recent, setRecent] = useState(true);
+  const [copied, setCopied] = useState('');
+
+  useEffect(() => { adminMembers().then(setData).catch((e) => setError(messageFor(e.code))); }, []);
+
+  const t = data?.totals;
+  const cutoff = new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10);
+  const match = (p) => !q || `${p.name} ${p.phone}`.toLowerCase().includes(q.toLowerCase());
+  const notJoined = (data?.not_joined || []).filter((p) => (!recent || (p.last_run && p.last_run >= cutoff)) && match(p));
+  const joined = (data?.joined || []).filter(match);
+  const checks = (data?.bad_numbers?.length || 0) + (data?.same_name?.length || 0);
+
+  async function copy(withNumbers) {
+    const lines = notJoined.map((p, i) => `${i + 1}. ${p.name}${withNumbers && /^\d{10}$/.test(p.phone) ? ` (${fmtPhone(p.phone)})` : ''}`);
+    const textOut = `Haven't joined the Mvmnt Tribe app yet:\n${lines.join('\n')}`;
+    try { await navigator.clipboard.writeText(textOut); setCopied(withNumbers ? 'numbers' : 'names'); }
+    catch { window.prompt('Copy this list', textOut); }
+    setTimeout(() => setCopied(''), 2200);
+  }
+
+  return (
+    <main className="shell">
+      <AdminBar />
+      <AdminTabs active="members" />
+      <div className="stack">
+        <h1 className="display">Members</h1>
+        {error && <p className="error" role="alert">{error}</p>}
+        {!error && !data && <p className="muted">Loading…</p>}
+        {t && (
+          <>
+            <dl className="tiles">
+              <div><dt>Accounts</dt><dd>{t.accounts}</dd><span>of {t.runners} runners</span></div>
+              <div><dt>New this week</dt><dd>{t.new_7d}</dd></div>
+              <div><dt>Opened this week</dt><dd>{t.active_7d}</dd></div>
+              <div><dt>Not joined yet</dt><dd>{t.not_joined}</dd><span>have runs logged</span></div>
+            </dl>
+            <div className="bar big" role="progressbar" aria-valuemin={0} aria-valuemax={100}
+                 aria-valuenow={Math.round((t.accounts / Math.max(1, t.runners)) * 100)} aria-label="Runners on the app">
+              <span style={{ width: `${Math.min(100, (t.accounts / Math.max(1, t.runners)) * 100)}%` }} />
+            </div>
+
+            <div className="seg" role="tablist" aria-label="Lists">
+              <button role="tab" aria-selected={view === 'not_joined'} className={view === 'not_joined' ? 'on' : ''} onClick={() => setView('not_joined')}>Not joined</button>
+              <button role="tab" aria-selected={view === 'joined'} className={view === 'joined' ? 'on' : ''} onClick={() => setView('joined')}>Joined</button>
+              <button role="tab" aria-selected={view === 'checks'} className={view === 'checks' ? 'on' : ''} onClick={() => setView('checks')}>Check{checks ? ` · ${checks}` : ''}</button>
+            </div>
+
+            {view !== 'checks' && (
+              <input className="input" type="search" placeholder="Search name or number" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search members" />
+            )}
+
+            {view === 'not_joined' && (
+              <section aria-label="Runners not on the app yet" className="stack tight">
+                <label className="check">
+                  <input type="checkbox" checked={recent} onChange={(e) => setRecent(e.target.checked)} />
+                  <span>Only people who ran in the last 30 days</span>
+                </label>
+                <div className="row">
+                  <button className="btn ghost half" onClick={() => copy(false)} disabled={!notJoined.length}>{copied === 'names' ? 'Copied' : 'Copy names'}</button>
+                  <button className="btn ghost half" onClick={() => copy(true)} disabled={!notJoined.length}>{copied === 'numbers' ? 'Copied' : 'Copy with numbers'}</button>
+                </div>
+                <p className="hint">{notJoined.length} {notJoined.length === 1 ? 'person' : 'people'} · most recent runners first</p>
+                <ol className="su-list">
+                  {notJoined.map((p) => (
+                    <li key={`${p.phone}-${p.name}`}>
+                      <div className="su-row"><span>{p.name}</span><strong className="tabular">{Number(p.km)} km</strong></div>
+                      <span className="muted small">{fmtPhone(p.phone)} · {p.runs} runs · last ran {dayMonth(p.last_run)}</span>
+                    </li>
+                  ))}
+                </ol>
+              </section>
+            )}
+
+            {view === 'joined' && (
+              <section aria-label="Runners on the app">
+                <p className="hint">{joined.length} {joined.length === 1 ? 'account' : 'accounts'} · newest first</p>
+                <ol className="su-list">
+                  {joined.map((p) => (
+                    <li key={`${p.phone}-${p.name}`}>
+                      <div className="su-row"><span>{p.name}</span><strong className="tabular">{Number(p.km)} km</strong></div>
+                      <span className="muted small">{fmtPhone(p.phone)} · joined {ago(p.joined)} · last opened {ago(p.last_seen)}</span>
+                    </li>
+                  ))}
+                </ol>
+              </section>
+            )}
+
+            {view === 'checks' && (
+              <section className="stack tight" aria-label="Profiles to check">
+                <h2 className="section-title">Same name, different numbers</h2>
+                <p className="hint">Usually one person with a typo in one entry, so their runs are split. Could also be two different people.</p>
+                {(data.same_name || []).length === 0 && <p className="muted">None.</p>}
+                {(data.same_name || []).map((g) => (
+                  <div className="check-card" key={g.name}>
+                    {g.people.map((p) => (
+                      <div className="su-row" key={p.phone}>
+                        <span>{p.name} <span className="muted">· {fmtPhone(p.phone)}</span>{p.joined && <span className="pill-mini">on app</span>}</span>
+                        <strong className="tabular">{Number(p.km)} km</strong>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+                <h2 className="section-title">Missing or broken numbers</h2>
+                <p className="hint">These runners can't log in or be matched until they have a proper 10-digit number.</p>
+                {(data.bad_numbers || []).length === 0 && <p className="muted">None.</p>}
+                <ol className="su-list">
+                  {(data.bad_numbers || []).map((p) => (
+                    <li key={`${p.phone}-${p.name}`}>
+                      <div className="su-row"><span>{p.name}</span><strong className="tabular">{Number(p.km)} km</strong></div>
+                      <span className="muted small">{fmtPhone(p.phone)}</span>
+                    </li>
+                  ))}
+                </ol>
+                <p className="hint">To merge or fix any of these, tell Claude the names and which number is right.</p>
+              </section>
+            )}
+          </>
+        )}
+      </div>
+    </main>
   );
 }
 
@@ -37,6 +183,7 @@ export function AdminRuns() {
   return (
     <main className="shell">
       <AdminBar />
+      <AdminTabs active="runs" />
       <div className="stack">
         <h1 className="display">Runs</h1>
         <a className="btn" href={href('admin/run/new')}>Add a run</a>

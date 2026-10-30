@@ -23,13 +23,22 @@ the only colour.
 - **Privacy.** Every table is locked. A logged-in member can only read their own
   profile, through `my_profile()`. Logged-out visitors get nothing.
 
-### Known limitation: nothing proves the number belongs to the person
+### WhatsApp codes (OTP)
 
-There's no SMS code, so whoever creates the password first owns that number's
-login. If someone claims the wrong number, or a member forgets their password,
-reset it (below). Adding a WhatsApp/SMS code later doesn't need any rebuild.
+When the `WHATSAPP_TOKEN` and `WHATSAPP_PHONE_ID` secrets are set on the Supabase edge functions,
+codes switch on automatically (no app redeploy):
+- **Sign-up** needs a 6-digit WhatsApp code, so every new account owns its number. Password-only
+  sign-up is refused while codes are on.
+- **Log in** offers "Send me a WhatsApp code" next to the password.
+- **Forgot password** becomes self-service: code + new password.
+- Codes are hashed, last 5 minutes, allow 5 tries, and are rate limited (30s between codes, 5 an hour,
+  10 a day per number, 30 an hour per network).
+- Optional secrets: `WHATSAPP_TEMPLATE` (default `otp_login`), `WHATSAPP_LANG` (default `en`). The
+  template must be a Meta *authentication* template with a copy-code button.
 
-## Resetting a member's login (forgotten password)
+Until then, the app works with passwords only, exactly as before.
+
+## Resetting a member's login by hand (only needed while codes are off)
 
 Run this in the Supabase SQL editor (or ask Claude):
 
@@ -125,6 +134,7 @@ npm run build && npx vite preview --port 4173 &
 node tests/ui-test.mjs ./screenshots          # login + home
 node tests/make-fixtures.mjs tests/fixtures   # needs ffmpeg: fake camera feed + poster
 node tests/runs-test.mjs ./screenshots        # runs, real QR scanning via a fake camera, admin
+node tests/otp-test.mjs ./screenshots         # WhatsApp code sign-up, login, reset
 ```
 
 ## Public leaderboard
