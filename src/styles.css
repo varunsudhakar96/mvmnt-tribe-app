@@ -7,6 +7,10 @@
   --line: #e5e5e5;
   --field: #fafafa;
   --error: #b42318;
+  /* status colours */
+  --ok: #067647;      --ok-bg: #ecfdf3;   --ok-line: #75e0a7;
+  --wait: #93370d;    --wait-bg: #fef7c3; --wait-line: #fdb022;
+  --bad: #b42318;     --bad-bg: #fef3f2;  --bad-line: #fda29b;
   --display: 'Barlow Condensed', 'Arial Narrow', sans-serif;
   --body: 'Barlow', system-ui, -apple-system, sans-serif;
   color-scheme: light;
@@ -457,13 +461,13 @@ button { cursor: pointer; background: none; border: 0; }
 .danger-zone { margin-top: 36px; padding-top: 20px; border-top: 1px solid var(--line); display: flex; flex-direction: column; }
 
 /* ---- Sign-up states ---- */
-.signed-tag { font-size: 13px; font-weight: 700; color: var(--ink); }
+.signed-tag { font-size: 13px; font-weight: 700; color: var(--ok); }
 .signed-banner {
   align-self: flex-start;
   display: inline-flex; align-items: center; gap: 8px;
   padding: 7px 12px 7px 10px;
   border-radius: 999px;
-  background: var(--ink); color: var(--bg);
+  background: var(--ok-bg); color: var(--ok); border: 1.5px solid var(--ok-line);
   font-weight: 600; font-size: 15px;
 }
 .signed-banner span { font-weight: 800; }
@@ -644,12 +648,15 @@ select.input { appearance: none; background-image: linear-gradient(45deg, transp
 .pay-done { font-weight: 700; }
 .pay-row { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
 .pay-chip { font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 6px; border: 1px solid var(--line); }
-.pay-chip.pay-confirmed { background: var(--ink); color: var(--bg); border-color: var(--ink); }
-.pay-chip.pay-claimed { border-color: var(--ink); }
-.pay-chip.pay-none { color: var(--error); border-color: var(--error); }
+.pay-chip.pay-confirmed { background: var(--ok-bg); color: var(--ok); border-color: var(--ok-line); }
+.pay-chip.pay-none { background: var(--wait-bg); color: var(--wait); border-color: var(--wait-line); }
+.pay-chip.pay-claimed { background: var(--wait-line); color: #4e1d09; border-color: var(--wait-line); }
+.pay-chip.pay-cancelled { background: var(--bad-bg); color: var(--bad); border-color: var(--bad-line); }
 .pending-banner {
   align-self: flex-start; display: inline-flex; align-items: center; gap: 8px;
-  padding: 6px 12px; border-radius: 999px; border: 1.5px dashed var(--ink); font-weight: 700; font-size: 15px;
+  padding: 6px 12px; border-radius: 999px; border: 1.5px solid var(--wait-line); background: var(--wait-bg); color: var(--wait); font-weight: 700; font-size: 15px;
 }
 .pending-body { padding-top: 6vh; }
-.pending-tag { font-weight: 700; color: var(--muted); }
+.pending-tag { font-weight: 700; color: var(--wait); }
+.pay-done { color: var(--ok); }
+.flag.flag-pending { color: var(--wait); background: var(--wait-bg); border: 1px solid var(--wait-line); padding: 1px 7px; border-radius: 6px; }

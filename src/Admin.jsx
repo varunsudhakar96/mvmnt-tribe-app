@@ -219,7 +219,7 @@ function AdminGroup({ title, runs, empty }) {
                 {r.is_today && <span className="today">Today</span>}
                 <span className="kind-tag">{r.kind === 'event' ? 'Event' : 'Run'}</span>
                 {r.signup_count > 0 && <span className="count">{r.signup_count} signed up</span>}
-                {r.pending_count > 0 && <span className="flag">{r.pending_count} pending</span>}
+                {r.pending_count > 0 && <span className="flag flag-pending">{r.pending_count} pending</span>}
                 {r.attendees?.length > 0 && <span className="count">{r.attendees.length} checked in</span>}
               </span>
             </a>
