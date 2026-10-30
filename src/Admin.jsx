@@ -219,6 +219,7 @@ function AdminGroup({ title, runs, empty }) {
                 {r.is_today && <span className="today">Today</span>}
                 <span className="kind-tag">{r.kind === 'event' ? 'Event' : 'Run'}</span>
                 {r.signup_count > 0 && <span className="count">{r.signup_count} signed up</span>}
+                {r.pending_count > 0 && <span className="flag">{r.pending_count} pending</span>}
                 {r.attendees?.length > 0 && <span className="count">{r.attendees.length} checked in</span>}
               </span>
             </a>
@@ -632,6 +633,7 @@ function Attendance({ run, onChange }) {
 
 // ---------- Who has signed up ----------
 const PAY_LABEL = { none: 'Not paid', claimed: 'Says paid', confirmed: 'Paid' };
+const payState = (p) => (p.status === 'confirmed' && (p.payment || 'none') !== 'confirmed' ? 'confirmed' : (p.payment || 'none'));
 
 function Signups({ run, onChange }) {
   const list = run.signups || [];
@@ -643,7 +645,9 @@ function Signups({ run, onChange }) {
     setBusy(memberId); setError('');
     try { onChange(await adminSetPayment(run.id, memberId, status)); } catch (e) { setError(messageFor(e.code)); } finally { setBusy(''); }
   }
-  const counts = paid ? list.reduce((c, p) => ({ ...c, [p.payment || 'none']: (c[p.payment || 'none'] || 0) + 1 }), {}) : {};
+  const counts = paid ? list.reduce((c, p) => ({ ...c, [payState(p)]: (c[payState(p)] || 0) + 1 }), {}) : {};
+  const confirmedN = list.filter((p) => p.status === 'confirmed').length;
+  const pendingN = list.length - confirmedN;
 
   function downloadCsv() {
     const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
@@ -652,7 +656,7 @@ function Signups({ run, onChange }) {
     const head = ['Name', 'Number', 'Signed up at', run.kind === 'event' ? 'Checked in' : 'Checked in (km)', ...(paid ? ['Payment'] : []), ...fields.map((f) => f.label)];
     const rows = list.map((p) => [p.name, p.phone, new Date(p.at).toLocaleString('en-IN'),
       run.kind === 'event' ? (checked.has(p.phone) ? 'Yes' : '') : (ran[p.phone] ?? ''),
-      ...(paid ? [PAY_LABEL[p.payment || 'none']] : []), ...fields.map((f) => answerText(p.answers?.[f.id]))]);
+      ...(paid ? [p.status === 'pending' ? `Pending (${PAY_LABEL[payState(p)]})` : PAY_LABEL[payState(p)]] : []), ...fields.map((f) => answerText(p.answers?.[f.id]))]);
     const csv = [head, ...rows].map((r) => r.map(esc).join(',')).join('\n');
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv' }));
@@ -663,10 +667,10 @@ function Signups({ run, onChange }) {
   return (
     <section className="signups" aria-labelledby="su-title">
       <h2 className="section-title" id="su-title">
-        Signed up · {list.length}{run.capacity != null ? ` of ${run.capacity}` : ''}
+        Signed up · {confirmedN}{run.capacity != null ? ` of ${run.capacity}` : ''}{pendingN ? ` · ${pendingN} pending` : ''}
       </h2>
       {paid && list.length > 0 && (
-        <p className="hint">{rupees(run.price)} each · {counts.confirmed || 0} paid · {counts.claimed || 0} say paid · {counts.none || 0} not paid</p>
+        <p className="hint">{rupees(run.price)} each · {counts.confirmed || 0} paid · {counts.claimed || 0} say paid, check and confirm · {counts.none || 0} not paid yet. Pending people hold a spot until you confirm or remove them.</p>
       )}
       {list.length === 0 ? (
         <p className="muted">{run.signup_enabled ? 'No sign-ups yet.' : 'Sign-ups are closed.'}</p>
@@ -678,10 +682,15 @@ function Signups({ run, onChange }) {
                 <div className="su-row"><span>{p.name}</span><span className="muted">{p.phone}</span></div>
                 {paid && (
                   <div className="pay-row">
-                    <span className={`pay-chip pay-${p.payment || 'none'}`}>{PAY_LABEL[p.payment || 'none']}</span>
-                    {(p.payment || 'none') !== 'confirmed'
-                      ? <button className="link inline" disabled={busy === p.member_id} onClick={() => setPay(p.member_id, 'confirmed')}>Mark paid</button>
-                      : <button className="link inline" disabled={busy === p.member_id} onClick={() => setPay(p.member_id, 'none')}>Undo</button>}
+                    <span className={`pay-chip pay-${payState(p)}`}>{p.status === 'pending' ? `Pending · ${PAY_LABEL[payState(p)].toLowerCase()}` : PAY_LABEL[payState(p)]}</span>
+                    {p.status === 'pending' ? (
+                      <>
+                        <button className="link inline" disabled={busy === p.member_id} onClick={() => setPay(p.member_id, 'confirmed')}>Mark paid</button>
+                        <button className="link inline" disabled={busy === p.member_id} onClick={() => setPay(p.member_id, 'remove')}>Remove</button>
+                      </>
+                    ) : (
+                      <button className="link inline" disabled={busy === p.member_id} onClick={() => setPay(p.member_id, 'none')}>Undo</button>
+                    )}
                   </div>
                 )}
                 {fields.some((f) => answerText(p.answers?.[f.id])) && (

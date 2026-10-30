@@ -9,6 +9,8 @@ const digits = (p) => String(p || '').replace(/\D/g, '').slice(-10);
 export const answerText = (v) => (Array.isArray(v) ? v.join(', ') : String(v ?? ''));
 const isBlank = (v) => (Array.isArray(v) ? v.length === 0 : !String(v ?? '').trim());
 const isRun = (r) => r?.kind !== 'event';
+const holding = (r) => r?.my_status === 'pending' || r?.my_status === 'confirmed';
+const pending = (r) => r?.my_status === 'pending';
 const rupees = (n) => `₹${Number(n || 0).toLocaleString('en-IN')}`;
 const upiLink = (r) => `upi://pay?pa=${encodeURIComponent(r.upi_id)}&pn=${encodeURIComponent('Mvmnt Tribe')}&am=${Number(r.price || 0)}&cu=INR&tn=${encodeURIComponent(r.name.slice(0, 40))}`;
 const kmText = (n) => { const v = Number(n || 0); return Number.isInteger(v) ? String(v) : String(+v.toFixed(2)); };
@@ -62,6 +64,7 @@ export function UpcomingRuns() {
                   {r.venue && <span className="muted run-venue">{r.venue}</span>}
                   {r.price > 0 && <span className="price-tag">{rupees(r.price)}</span>}
                   {r.signed_up && <span className="signed-tag">✓ Signed up</span>}
+                  {pending(r) && <span className="signed-tag pending-tag">{r.my_payment === 'claimed' ? 'Payment being checked' : 'Payment pending'}</span>}
                 </span>
                 <span className="chev" aria-hidden="true">›</span>
               </a>
@@ -117,8 +120,10 @@ export function RunPage({ id, profile }) {
           <div className="event-copy">
             {run.checked_in ? (
               <p className="signed-banner"><span aria-hidden="true">✓</span> {isRun(run) ? `Run logged · ${kmText(run.my_checkin_km)} km` : 'Checked in'}</p>
-            ) : run.signed_up && !run.is_past && (
+            ) : run.signed_up && !run.is_past ? (
               <p className="signed-banner"><span aria-hidden="true">✓</span> You're signed up</p>
+            ) : pending(run) && !run.is_past && (
+              <p className="pending-banner">{run.my_payment === 'claimed' ? 'Waiting for payment confirmation' : 'Payment pending'}</p>
             )}
             <p className="eyebrow">
               {run.is_today && <span className="today">Today</span>}
@@ -137,10 +142,10 @@ export function RunPage({ id, profile }) {
               <a className="link inline" href={run.map_url} target="_blank" rel="noreferrer">Open in Maps</a>
             )}
             {run.description && <p className="event-desc">{run.description}</p>}
-            {run.price > 0 && !run.signed_up && !run.is_past && (
+            {run.price > 0 && !holding(run) && !run.is_past && (
               <p className="spots">{rupees(run.price)} · pay after you sign up</p>
             )}
-            {!run.is_past && run.signup_enabled && run.capacity != null && !run.signed_up && (
+            {!run.is_past && run.signup_enabled && run.capacity != null && !holding(run) && (
               <p className="spots">{run.spots_left > 0 ? `${run.spots_left} of ${run.capacity} spots left` : 'This one is full.'}</p>
             )}
             {run.is_past && <p className="note">This {isRun(run) ? 'run' : 'event'} has finished.</p>}
@@ -152,9 +157,9 @@ export function RunPage({ id, profile }) {
               <p className="hint">Wrong distance? Tap Attend run and scan the QR again to fix it.</p>
             )}
 
-            {run.signed_up && run.price > 0 && <PayCard run={run} onChange={setRun} />}
+            {holding(run) && run.price > 0 && <PayCard run={run} onChange={setRun} />}
 
-            {run.signed_up && !run.is_past && !run.checked_in && (
+            {holding(run) && !run.is_past && !run.checked_in && (
               <div className="my-signup">
                 {answered.length > 0 && (
                   <dl className="confirm-facts">
@@ -202,18 +207,18 @@ function PayCard({ run, onChange }) {
     <section className="pay-card" aria-labelledby="pay-title">
       <h2 className="section-title" id="pay-title">Pay {rupees(run.price)}</h2>
       {status === 'claimed' ? (
-        <p className="muted">Thanks. The organiser will confirm your payment.</p>
+        <p className="muted">Thanks. We're checking your payment. Your spot is confirmed as soon as the organiser marks it paid.</p>
       ) : (
-        <p className="muted">Pay with any UPI app, then tap “I've paid”.</p>
+        <p className="muted">Your spot is held. Pay with any UPI app, then tap “I've paid”.</p>
       )}
-      {run.payment_qr_url && <img className="pay-qr" src={run.payment_qr_url} alt="Payment QR code" />}
-      {run.upi_id && <a className="btn" href={upiLink(run)}>Pay with UPI app</a>}
-      {run.payment_qr_url && (
+      {status === 'none' && run.payment_qr_url && <img className="pay-qr" src={run.payment_qr_url} alt="Payment QR code" />}
+      {status === 'none' && run.upi_id && <a className="btn" href={upiLink(run)}>Pay with UPI app</a>}
+      {status === 'none' && run.payment_qr_url && (
         <a className="link inline center-link" href={run.payment_qr_url} download target="_blank" rel="noreferrer">
           Save the QR to pay from another app
         </a>
       )}
-      {run.upi_id && <p className="hint center">UPI ID: <strong>{run.upi_id}</strong></p>}
+      {status === 'none' && run.upi_id && <p className="hint center">UPI ID: <strong>{run.upi_id}</strong></p>}
       {status === 'none' && (
         <button className={run.upi_id ? 'btn ghost' : 'btn'} onClick={claim} disabled={busy}>{busy ? 'Saving…' : "I've paid"}</button>
       )}
@@ -242,7 +247,7 @@ function RunActions({ run, loggedIn }) {
   const checkedIn = run.checked_in;
   const attendLabel = isRun(run) ? 'Attend run' : 'Check in';
   const attendLocked = !attendLive && run.signed_up && !run.is_today;
-  const canSignup = run.signup_enabled && !run.signed_up && !checkedIn;
+  const canSignup = run.signup_enabled && !holding(run) && !checkedIn;
   const full = canSignup && run.capacity != null && run.spots_left <= 0;
   if (!attendLive && !attendLocked && !canSignup) return null;
   const to = (path) => (loggedIn ? href(path) : href(`login?next=${path}`));
@@ -303,9 +308,10 @@ export function SignupPage({ id, profile }) {
     }
   }
 
+  if (done && pending(done)) return <PendingScreen run={done} onChange={setDone} onDone={() => go(`run/${id}`)} />;
   if (done) return <SignedUpScreen run={done} onDone={() => go(`run/${id}`)} />;
 
-  const editing = run?.signed_up;
+  const editing = holding(run);
   const closed = run && (run.is_past || !run.signup_enabled);
   const full = run && !editing && run.capacity != null && run.spots_left <= 0;
 
@@ -398,6 +404,29 @@ function Question({ f, value, onChange, invalid }) {
   );
 }
 
+function PendingScreen({ run, onChange, onDone }) {
+  const claimed = run.my_payment === 'claimed';
+  return (
+    <main className="shell confirm">
+      <div className="confirm-body pending-body">
+        <p className="pending-banner">{claimed ? 'Waiting for confirmation' : 'Pending'}</p>
+        <h1 className="display">{claimed ? 'Payment sent.' : 'One last step.'}</h1>
+        <p className="lede">
+          {claimed
+            ? <>We're checking your payment for <strong>{run.name}</strong>. You'll show as signed up once it's confirmed.</>
+            : <>Your spot for <strong>{run.name}</strong> is held. Pay {rupees(run.price)} to confirm it.</>}
+        </p>
+        <dl className="confirm-facts">
+          <div><dt>When</dt><dd>{when(run) || runDate(run.date)}</dd></div>
+          {run.venue && <div><dt>Where</dt><dd>{run.venue}</dd></div>}
+        </dl>
+        <PayCard run={run} onChange={onChange} />
+      </div>
+      <button className={claimed ? 'btn' : 'btn ghost'} onClick={onDone}>{claimed ? 'Done' : "I'll pay later"}</button>
+    </main>
+  );
+}
+
 function SignedUpScreen({ run, onDone }) {
   return (
     <main className="shell confirm">
@@ -411,9 +440,6 @@ function SignedUpScreen({ run, onDone }) {
           <div><dt>When</dt><dd>{when(run) || runDate(run.date)}</dd></div>
           {run.venue && <div><dt>Where</dt><dd>{run.venue}</dd></div>}
         </dl>
-        {run.price > 0 && run.my_payment !== 'confirmed' && (
-          <div className="note"><p><strong>Next: pay {rupees(run.price)}.</strong> The payment QR is on the event page after you tap Done.</p></div>
-        )}
         <div className="note"><p>On the day, open this {isRun(run) ? 'run' : 'event'} and tap <strong>{isRun(run) ? 'Attend run' : 'Check in'}</strong>, then scan the QR at the venue.</p></div>
       </div>
       <button className="btn" onClick={onDone}>Done</button>
