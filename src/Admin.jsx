@@ -2,10 +2,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import {
   adminListRuns, adminMembers, adminSetPayment, adminSaveRun, adminDeleteRun, adminNewQr, adminAddAttendee, adminRemoveAttendee, uploadPoster, normalisePhone,
+  adminEndEvent, adminListBadges, adminSaveBadge, uploadBadgeImage,
   checkinLink, messageFor, runDate, runTime,
 } from './api.js';
 import { go, href } from './router.js';
-import { answerText, ShareButton } from './Runs.jsx';
+import { answerText, ShareButton, BadgeImg } from './Runs.jsx';
 
 const LAST_KM = 'mvmnt.lastRunKm';
 const remember = (k, v) => { try { localStorage.setItem(k, v); } catch { /* private mode */ } };
@@ -191,8 +192,8 @@ export function AdminRuns() {
         {!error && runs === undefined && <p className="muted">Loading…</p>}
         {runs && (
           <>
-            <AdminGroup title="Upcoming" runs={upcoming} empty="Nothing scheduled. Add the next one." />
-            {past.length > 0 && <AdminGroup title="Past" runs={past.slice(0, 12)} />}
+            <AdminGroup title="Upcoming & running" runs={upcoming} empty="Nothing scheduled. Add the next one." />
+            {past.length > 0 && <AdminGroup title="Past events" runs={past.slice(0, 20)} />}
           </>
         )}
       </div>
@@ -212,15 +213,17 @@ function AdminGroup({ title, runs, empty }) {
               <span>
                 <span className="run-name">{r.name}</span>
                 <span className="muted">
-                  {[runDate(r.date), runTime(r.time), r.venue].filter(Boolean).join(' · ')}
+                  {[r.kind === 'program' ? `${r.check_in_live || r.is_past ? 'Started' : 'Starts'} ${runDate(r.date)}` : runDate(r.date),
+                    r.kind === 'program' && r.classes ? `${r.classes} classes` : runTime(r.time), r.venue].filter(Boolean).join(' · ')}
                 </span>
               </span>
               <span className="flags">
-                {r.is_today && <span className="today">Today</span>}
-                <span className="kind-tag">{r.kind === 'event' ? 'Event' : 'Run'}</span>
+                {r.is_today && r.kind !== 'program' && !r.ended && <span className="today">Today</span>}
+                {r.ended && <span className="flag flag-ended">Ended</span>}
+                <span className="kind-tag">{KIND_LABEL[r.kind] || 'Run'}</span>
                 {r.signup_count > 0 && <span className="count">{r.signup_count} signed up</span>}
                 {r.pending_count > 0 && <span className="flag flag-pending">{r.pending_count} pending</span>}
-                {r.attendees?.length > 0 && <span className="count">{r.attendees.length} checked in</span>}
+                {r.attendees?.length > 0 && <span className="count">{r.kind === 'program' ? `${new Set(r.attendees.map((a) => a.member_id)).size} attending` : `${r.attendees.length} checked in`}</span>}
               </span>
             </a>
           </li>
@@ -232,7 +235,13 @@ function AdminGroup({ title, runs, empty }) {
 
 // ---------- Add / edit ----------
 const EMPTY = { kind: 'run', name: '', date: '', time: '06:00', venue: '', map_url: '', description: '', run_km: '5', poster_url: '',
-  signup_enabled: true, signup_fields: [], capacity: '', price: '', payment_qr_url: '', upi_id: '' };
+  signup_enabled: true, signup_fields: [], capacity: '', price: '', payment_qr_url: '', upi_id: '', classes: '', badge_id: '' };
+const KIND_LABEL = { run: 'Run', event: 'Event', program: 'Program' };
+const KIND_HINT = {
+  run: "Check-ins log km toward runners' totals and badges.",
+  event: 'One-day workshops, socials, anything else. Check-in records attendance; no km.',
+  program: 'A course of classes, e.g. 4 weeks of Animal Flow. People check in at every class; finishing them all can earn a badge.',
+};
 const LAST_FIELDS = 'mvmnt.lastSignupFields';
 const lastFields = () => { try { return JSON.parse(recall(LAST_FIELDS) || '[]').map((f) => ({ ...f, id: newId() })); } catch { return []; } };
 const rupees = (n) => `₹${Number(n || 0).toLocaleString('en-IN')}`;
@@ -248,8 +257,11 @@ export function AdminRunEdit({ id }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const fileRef = useRef(null);
   const payRef = useRef(null);
-  const isEvent = form?.kind === 'event';
-  const noun = isEvent ? 'event' : 'run';
+  const kind = form?.kind || 'run';
+  const isEvent = kind !== 'run';
+  const isProgram = kind === 'program';
+  const noun = kind;
+  const [endAsk, setEndAsk] = useState(false);
 
   useEffect(() => {
     if (isNew) return;
@@ -259,7 +271,8 @@ export function AdminRunEdit({ id }) {
         if (!r) { setError(messageFor('run_not_found')); return; }
         setSaved(r);
         setForm({ ...EMPTY, ...Object.fromEntries(Object.keys(EMPTY).map((k) => [k, r[k] ?? ''])),
-                  price: r.price ? String(r.price) : '', kind: r.kind || 'run' });
+                  price: r.price ? String(r.price) : '', kind: r.kind || 'run',
+                  classes: r.classes ? String(r.classes) : '', badge_id: r.badge_id || '' });
       })
       .catch((e) => setError(messageFor(e.code)));
   }, [id, isNew]);
@@ -309,6 +322,13 @@ export function AdminRunEdit({ id }) {
     }
   }
 
+  async function endIt(end) {
+    setBusy('end'); setError('');
+    try { setSaved(await adminEndEvent(id, end)); setEndAsk(false); setNotice(end ? 'Ended. It now shows under Past events.' : 'Reopened.'); }
+    catch (err) { setError(messageFor(err.code)); }
+    finally { setBusy(''); }
+  }
+
   async function remove() {
     setBusy('delete');
     try { await adminDeleteRun(id); go('admin'); } catch (err) { setError(messageFor(err.code)); setBusy(''); }
@@ -334,15 +354,13 @@ export function AdminRunEdit({ id }) {
 
         <fieldset className="field type-pick">
           <legend className="label">What is it?</legend>
-          <div className="seg two-seg" role="radiogroup">
-            <button type="button" role="radio" aria-checked={!isEvent} className={!isEvent ? 'on' : ''}
-                    onClick={() => setForm((f) => ({ ...f, kind: 'run' }))}>Run</button>
-            <button type="button" role="radio" aria-checked={isEvent} className={isEvent ? 'on' : ''}
-                    onClick={() => setForm((f) => ({ ...f, kind: 'event' }))}>Event</button>
+          <div className="seg three-seg" role="radiogroup">
+            {['run', 'event', 'program'].map((k) => (
+              <button key={k} type="button" role="radio" aria-checked={kind === k} className={kind === k ? 'on' : ''}
+                      onClick={() => setForm((f) => ({ ...f, kind: k }))}>{KIND_LABEL[k]}</button>
+            ))}
           </div>
-          <span className="hint">{isEvent
-            ? 'Workshops, socials, anything else. Check-in records attendance; no km.'
-            : 'Check-ins log km toward runners\' totals and badges.'}</span>
+          <span className="hint">{KIND_HINT[kind]}</span>
         </fieldset>
 
         <div className="field">
@@ -367,10 +385,10 @@ export function AdminRunEdit({ id }) {
         </div>
 
         <Field label="Title" required>
-          <input className="input" value={form.name} onChange={set('name')} placeholder={isEvent ? 'Mudgar Workshop' : 'Saturday 5K'} required />
+          <input className="input" value={form.name} onChange={set('name')} placeholder={isProgram ? 'Animal Flow Level 1 · 4 weeks' : isEvent ? 'Mudgar Workshop' : 'Saturday 5K'} required />
         </Field>
         <div className="two">
-          <Field label="Date" required>
+          <Field label={isProgram ? 'First class' : 'Date'} required>
             <input className="input" type="date" value={form.date} onChange={set('date')} required />
           </Field>
           <Field label="Start time">
@@ -386,6 +404,17 @@ export function AdminRunEdit({ id }) {
         <Field label="Details" hint={isEvent ? 'Optional: what happens, who it is for, what to bring.' : 'Optional: route, distance, what to bring.'}>
           <textarea className="input area" rows={3} value={form.description} onChange={set('description')} />
         </Field>
+        {isProgram && (
+          <section className="builder" aria-labelledby="prog-h">
+            <h2 className="section-title" id="prog-h">Program</h2>
+            <Field label="Number of classes" required hint="How many times people check in to complete it, e.g. 4 for a once-a-week, 4-week program. One check-in per person per day.">
+              <input className="input" inputMode="numeric" value={form.classes ?? ''} placeholder="4"
+                     onChange={(e) => setForm((f) => ({ ...f, classes: e.target.value.replace(/\D/g, '').slice(0, 3) }))} />
+            </Field>
+            <BadgePicker value={form.badge_id} classes={form.classes} onChange={(v) => setForm((f) => ({ ...f, badge_id: v }))} />
+          </section>
+        )}
+
         <SignupBuilder form={form} setForm={setForm} hasSignups={(saved?.signup_count || 0) > 0} />
 
         {!isEvent && (
@@ -435,7 +464,30 @@ export function AdminRunEdit({ id }) {
 
       {!isNew && saved && <Attendance run={saved} onChange={setSaved} />}
       {!isNew && saved && <Signups run={saved} onChange={setSaved} />}
-      {!isNew && saved && <VenueQr run={saved} onChange={setSaved} />}
+      {!isNew && saved && !saved.ended && <VenueQr run={saved} onChange={setSaved} />}
+
+      {!isNew && saved && (
+        <section className="end-zone" aria-labelledby="end-h">
+          <h2 className="section-title" id="end-h">{saved.ended ? 'Ended' : `End this ${noun}`}</h2>
+          {saved.ended ? (
+            <>
+              <p className="muted">Ended on {runDate(saved.ended_on)}. It shows under Past events, with no Sign up or Check in buttons.</p>
+              <button className="btn ghost" onClick={() => endIt(false)} disabled={busy === 'end'}>{busy === 'end' ? 'Working…' : 'Reopen it'}</button>
+            </>
+          ) : !endAsk ? (
+            <>
+              <p className="muted">{isProgram ? 'When the last class is done, end the program.' : 'Once it’s over, end it.'} It moves to Past events and sign-ups and check-ins close.{isProgram ? ' Badges already earned stay.' : ''}</p>
+              <button className="btn ghost" onClick={() => setEndAsk(true)}>End {noun}</button>
+            </>
+          ) : (
+            <div className="stack">
+              <p className="muted">End “{form.name}” now? You can reopen it later if you need to.</p>
+              <button className="btn" onClick={() => endIt(true)} disabled={busy === 'end'}>{busy === 'end' ? 'Ending…' : `Yes, end the ${noun}`}</button>
+              <button className="btn ghost" onClick={() => setEndAsk(false)}>Not yet</button>
+            </div>
+          )}
+        </section>
+      )}
 
       {!isNew && (
         <section className="danger-zone">
@@ -463,6 +515,82 @@ function Field({ label, hint, required, children }) {
       {children}
       {hint && <span className="hint">{hint}</span>}
     </label>
+  );
+}
+
+// ---------- Badge picker (badges are saved and reusable) ----------
+function BadgePicker({ value, classes, onChange }) {
+  const [badges, setBadges] = useState(undefined);
+  const [adding, setAdding] = useState(false);
+  const [name, setName] = useState('');
+  const [img, setImg] = useState('');
+  const [busy, setBusy] = useState('');
+  const [error, setError] = useState('');
+  const fileRef = useRef(null);
+
+  useEffect(() => { adminListBadges().then(setBadges).catch((e) => { setBadges([]); setError(messageFor(e.code)); }); }, []);
+
+  async function pick(e) {
+    const file = e.target.files?.[0]; e.target.value = '';
+    if (!file) return;
+    setBusy('img'); setError('');
+    try { setImg(await uploadBadgeImage(file)); } catch (err) { setError(messageFor(err.code)); } finally { setBusy(''); }
+  }
+  async function saveBadge() {
+    setBusy('save'); setError('');
+    try {
+      const b = await adminSaveBadge({ name, image_url: img });
+      setBadges((list) => [b, ...(list || [])]);
+      onChange(b.id); setAdding(false); setName(''); setImg('');
+    } catch (err) { setError(messageFor(err.code)); } finally { setBusy(''); }
+  }
+
+  const chosen = (badges || []).find((b) => b.id === value);
+  return (
+    <div className="field">
+      <span className="label">Badge for finishing</span>
+      <span className="hint">
+        {chosen
+          ? `Given automatically to anyone who checks in to all ${classes || 'the'} classes.`
+          : 'Optional. Pick a saved badge or add a new one. It’s given automatically to everyone who completes every class.'}
+      </span>
+      {badges === undefined && <p className="muted">Loading badges…</p>}
+      {badges && (
+        <div className="badge-pick" role="radiogroup" aria-label="Badge">
+          <button type="button" role="radio" aria-checked={!value} className={`badge-opt${!value ? ' on' : ''}`} onClick={() => onChange('')}>
+            <span className="badge-img none"><span>—</span></span>
+            <span className="badge-opt-name">No badge</span>
+          </button>
+          {badges.map((b) => (
+            <button type="button" role="radio" key={b.id} aria-checked={value === b.id} className={`badge-opt${value === b.id ? ' on' : ''}`} onClick={() => onChange(b.id)}>
+              <BadgeImg badge={b} size={56} />
+              <span className="badge-opt-name">{b.name}</span>
+              {b.awarded > 0 && <span className="muted small">{b.awarded} earned</span>}
+            </button>
+          ))}
+        </div>
+      )}
+      {!adding ? (
+        <button type="button" className="btn ghost" onClick={() => setAdding(true)}>+ New badge</button>
+      ) : (
+        <div className="new-badge stack tight">
+          <div className="new-badge-row">
+            <button type="button" className={`badge-drop${img ? ' has' : ''}`} onClick={() => fileRef.current?.click()} disabled={busy === 'img'} aria-label="Badge image">
+              {img ? <img src={img} alt="New badge" /> : <span>{busy === 'img' ? 'Uploading…' : 'Add image'}</span>}
+            </button>
+            <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={pick} />
+            <label className="field grow">
+              <span className="label">Badge name</span>
+              <input className="input" value={name} maxLength={60} onChange={(e) => setName(e.target.value)} placeholder="Animal Flow · Level 1" />
+            </label>
+          </div>
+          <span className="hint">A square PNG with a transparent background looks best. Saved badges can be reused for later programs.</span>
+          <button type="button" className="btn" onClick={saveBadge} disabled={!!busy}>{busy === 'save' ? 'Saving…' : 'Save badge'}</button>
+          <button type="button" className="link" onClick={() => { setAdding(false); setError(''); }}>Cancel</button>
+        </div>
+      )}
+      {error && <p className="error" role="alert">{error}</p>}
+    </div>
   );
 }
 
@@ -552,7 +680,124 @@ function SignupBuilder({ form, setForm, hasSignups }) {
 }
 
 // ---------- Who ran ----------
+const today = () => new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(0, 10); // IST
+
 function Attendance({ run, onChange }) {
+  if (run.kind === 'program') return <ProgramAttendance run={run} onChange={onChange} />;
+  return <DayAttendance run={run} onChange={onChange} />;
+}
+
+function AddAttendee({ run, onChange, withDate = false }) {
+  const [phone, setPhone] = useState('');
+  const [name, setName] = useState('');
+  const [km, setKm] = useState('');
+  const [date, setDate] = useState(today());
+  const [needName, setNeedName] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [open, setOpen] = useState(false);
+  async function add(e) {
+    e.preventDefault();
+    const p = normalisePhone(phone);
+    if (!p) { setError(messageFor('invalid_phone')); return; }
+    setBusy(true); setError('');
+    try {
+      onChange(await adminAddAttendee(run.id, p, km ? Number(km) : null, name, withDate ? date : null));
+      setPhone(''); setName(''); setKm(''); setNeedName(false); setOpen(false);
+    } catch (err) {
+      if (err.code === 'name_needed') setNeedName(true);
+      setError(messageFor(err.code));
+    } finally { setBusy(false); }
+  }
+  if (!open) return <button className="btn ghost" onClick={() => setOpen(true)}>+ Add someone who couldn't scan</button>;
+  return (
+    <form className="stack add-att" onSubmit={add} noValidate>
+      <label className="field">
+        <span className="label">Their number</span>
+        <input className="input" type="tel" inputMode="numeric" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="98765 43210" />
+      </label>
+      {needName && (
+        <label className="field">
+          <span className="label">Their name</span>
+          <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
+        </label>
+      )}
+      {withDate && (
+        <label className="field">
+          <span className="label">Class date</span>
+          <input className="input" type="date" value={date} min={run.date} max={today()} onChange={(e) => setDate(e.target.value)} />
+        </label>
+      )}
+      {run.kind === 'run' && (
+        <label className="field">
+          <span className="label">Distance (km)</span>
+          <input className="input" inputMode="decimal" value={km} placeholder={String(run.run_km ?? 5)}
+                 onChange={(e) => setKm(e.target.value.replace(/[^0-9.]/g, '').slice(0, 5))} />
+        </label>
+      )}
+      <button className="btn" type="submit" disabled={busy}>{busy ? 'Adding…' : 'Check them in'}</button>
+      <button type="button" className="link" onClick={() => { setOpen(false); setError(''); setNeedName(false); }}>Cancel</button>
+      {error && <p className="error" role="alert">{error}</p>}
+    </form>
+  );
+}
+
+function ProgramAttendance({ run, onChange }) {
+  const list = run.attendees || [];
+  const total = Number(run.classes || 0);
+  const [busy, setBusy] = useState('');
+  const [error, setError] = useState('');
+  const people = Object.values(list.reduce((acc, a) => {
+    const p = acc[a.member_id] || (acc[a.member_id] = { member_id: a.member_id, name: a.name, phone: a.phone, dates: [], badge: a.badge });
+    p.dates.push(a.date); return acc;
+  }, {})).map((p) => ({ ...p, dates: [...p.dates].sort() })).sort((x, y) => y.dates.length - x.dates.length || x.name.localeCompare(y.name));
+  const byDay = Object.entries(list.reduce((acc, a) => ({ ...acc, [a.date]: (acc[a.date] || 0) + 1 }), {})).sort();
+  const finished = total ? people.filter((p) => p.dates.length >= total).length : 0;
+
+  async function remove(m, d) {
+    setBusy(`${m}-${d}`); setError('');
+    try { onChange(await adminRemoveAttendee(run.id, m, d)); } catch (err) { setError(messageFor(err.code)); } finally { setBusy(''); }
+  }
+
+  return (
+    <section className="signups" aria-labelledby="att-title">
+      <h2 className="section-title" id="att-title">Attendance · {people.length} {people.length === 1 ? 'person' : 'people'}</h2>
+      {byDay.length > 0 && (
+        <p className="hint">
+          {byDay.length} {byDay.length === 1 ? 'class' : 'classes'} so far: {byDay.map(([d, n]) => `${dayMonth(d)} (${n})`).join(', ')}.
+          {total ? ` ${finished} finished all ${total}.` : ''}
+        </p>
+      )}
+      {people.length === 0 && <p className="muted">{run.check_in_live ? 'Nobody has checked in yet.' : 'Check-ins open at the first class.'}</p>}
+      {people.length > 0 && (
+        <ol className="su-list">
+          {people.map((p) => (
+            <li key={p.member_id}>
+              <div className="su-row">
+                <span>{p.name}{p.badge && <span className="pill-mini badge-pill">badge ✓</span>}</span>
+                <strong className="tabular">{total ? `${Math.min(p.dates.length, total)}/${total}` : p.dates.length}</strong>
+              </div>
+              <span className="muted small">{p.phone}</span>
+              <div className="date-chips">
+                {p.dates.map((d) => (
+                  <span key={d} className="date-chip">
+                    {dayMonth(d)}
+                    <button className="chip-x" onClick={() => remove(p.member_id, d)} disabled={busy === `${p.member_id}-${d}`}
+                            aria-label={`Remove ${p.name}'s check-in on ${dayMonth(d)}`}>×</button>
+                  </span>
+                ))}
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
+      {!run.ended && <AddAttendee run={run} onChange={onChange} withDate />}
+      {error && <p className="error" role="alert">{error}</p>}
+    </section>
+  );
+}
+
+function DayAttendance({ run, onChange }) {
   const list = run.attendees || [];
   const [phone, setPhone] = useState('');
   const [name, setName] = useState('');
@@ -653,9 +898,10 @@ function Signups({ run, onChange }) {
     const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
     const ran = Object.fromEntries((run.attendees || []).map((a) => [a.phone, a.km]));
     const checked = new Set((run.attendees || []).map((a) => a.phone));
-    const head = ['Name', 'Number', 'Signed up at', run.kind === 'event' ? 'Checked in' : 'Checked in (km)', ...(paid ? ['Payment'] : []), ...fields.map((f) => f.label)];
+    const classesOf = (phone) => (run.attendees || []).filter((a) => a.phone === phone).length;
+    const head = ['Name', 'Number', 'Signed up at', run.kind === 'program' ? 'Classes attended' : run.kind === 'event' ? 'Checked in' : 'Checked in (km)', ...(paid ? ['Payment'] : []), ...fields.map((f) => f.label)];
     const rows = list.map((p) => [p.name, p.phone, new Date(p.at).toLocaleString('en-IN'),
-      run.kind === 'event' ? (checked.has(p.phone) ? 'Yes' : '') : (ran[p.phone] ?? ''),
+      run.kind === 'program' ? `${classesOf(p.phone)}/${run.classes || ''}` : run.kind === 'event' ? (checked.has(p.phone) ? 'Yes' : '') : (ran[p.phone] ?? ''),
       ...(paid ? [p.status === 'pending' ? `Pending (${PAY_LABEL[payState(p)]})` : PAY_LABEL[payState(p)]] : []), ...fields.map((f) => answerText(p.answers?.[f.id]))]);
     const csv = [head, ...rows].map((r) => r.map(esc).join(',')).join('\n');
     const a = document.createElement('a');
@@ -759,7 +1005,7 @@ function VenueQr({ run, onChange }) {
   return (
     <section className="qr-card" aria-labelledby="qr-title">
       <h2 className="section-title" id="qr-title">Venue QR</h2>
-      <p className="muted">Print this and keep it at the venue. People scan it in the app to check in. It only works on the day, and only for this one.</p>
+      <p className="muted">Print this and keep it at the venue. People scan it in the app to check in. {run.kind === 'program' ? 'Use the same QR at every class: it works from the first class until you end the program, once per person per day.' : 'It only works on the day, and only for this one.'}</p>
       {local && <p className="flag-note">You're on a test copy. Make the QR from the live site so it points to the right address.</p>}
       {src && <img className="qr" src={src} alt="Check-in QR code for this run" />}
       <button className="btn" onClick={download} disabled={!src}>Download QR</button>

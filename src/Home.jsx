@@ -3,7 +3,7 @@ import { getProfile, logOut, messageFor, uploadAvatar } from './api.js';
 import { useRoute, href } from './router.js';
 import Wordmark from './Wordmark.jsx';
 import Badge from './Badge.jsx';
-import { RunPage, ScanPage, CheckInPage, SignupPage } from './Runs.jsx';
+import { RunPage, ScanPage, CheckInPage, SignupPage, BadgeImg } from './Runs.jsx';
 import Landing from './Landing.jsx';
 import Avatar from './Avatar.jsx';
 const AdminRuns = lazy(() => import('./Admin.jsx').then((m) => ({ default: m.AdminRuns })));
@@ -171,6 +171,21 @@ function Dashboard({ p }) {
         </div>
       </section>
 
+      {p.badges?.length > 0 && (
+        <section aria-labelledby="earned">
+          <h2 className="section-title" id="earned">Program badges · {p.badges.length}</h2>
+          <ul className="badge-grid">
+            {p.badges.map((b, i) => (
+              <li key={`${b.name}-${i}`}>
+                <BadgeImg badge={b} size={84} />
+                <span className="badge-grid-name">{b.name}</span>
+                <span className="muted small">{shortDate(b.on)}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       <section aria-labelledby="recent">
         <h2 className="section-title" id="recent">Recent runs</h2>
         {p.recent?.length ? (
@@ -184,6 +199,31 @@ function Dashboard({ p }) {
           </ol>
         ) : (
           <p className="muted">No runs logged yet. Your next Saturday run will show up here.</p>
+        )}
+      </section>
+
+      <section aria-labelledby="attended">
+        <h2 className="section-title" id="attended">Events & programs{p.attended?.length ? ` · ${p.attended.length}` : ''}</h2>
+        {p.attended?.length ? (
+          <ol className="att-log">
+            {p.attended.map((a) => (
+              <li key={a.id}>
+                <a href={href(`run/${a.id}`)}>
+                  <span className="att-log-copy">
+                    <span className="run-name">{a.name}</span>
+                    <span className="muted small">
+                      {a.kind === 'program' ? 'Program' : 'Event'} · {a.count > 1 && a.first !== a.last ? `${shortDate(a.first)} – ${shortDate(a.last)}` : shortDate(a.last)}
+                    </span>
+                  </span>
+                  <strong className="att-log-n">
+                    {a.kind === 'program' && a.classes ? `${Math.min(a.count, a.classes)}/${a.classes}` : '✓'}
+                  </strong>
+                </a>
+              </li>
+            ))}
+          </ol>
+        ) : (
+          <p className="muted">No events yet. Check in at a workshop or program and it shows up here.</p>
         )}
       </section>
 

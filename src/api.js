@@ -63,6 +63,15 @@ const MESSAGES = {
   bad_distance: 'Enter a distance between 0.5 and 60 km.',
   name_needed: "That number isn't in the Tribe yet. Add their name too.",
   choice_needs_options: 'Add at least one option to every multiple-choice question.',
+  // programs, badges, ending
+  event_ended: 'This has ended. Check-in is closed.',
+  program_not_started: "This program hasn't started yet. Check in from the first class.",
+  classes_required: 'Enter how many classes the program has (1 to 100).',
+  bad_class_date: 'Pick a class date between the start date and today.',
+  badge_not_found: 'That badge no longer exists. Pick another.',
+  badge_name_required: 'Give the badge a name.',
+  badge_name_too_long: 'Keep the badge name under 60 characters.',
+  badge_image_required: 'Add an image for the badge.',
 };
 export const messageFor = (code) => MESSAGES[code] ?? MESSAGES.server_error;
 
@@ -156,6 +165,7 @@ export const getProfile = () => rpc('my_profile');
 
 // ---- Runs ----
 export const upcomingRuns = () => rpc('upcoming_runs');
+export const pastEvents = () => rpc('past_events');
 export const runDetail = (id) => rpc('run_detail', { p_id: id });
 export const attendRun = (id, code) => rpc('attend_run', { p_id: id, p_code: code });
 export const signUp = (id, answers) => rpc('sign_up_for_run', { p_id: id, p_answers: answers });
@@ -194,11 +204,14 @@ export const adminSetPayment = (id, memberId, status) => rpc('admin_set_payment'
 export const adminSaveRun = (run) => rpc('admin_save_run', { p: run });
 export const adminDeleteRun = (id) => rpc('admin_delete_run', { p_id: id });
 export const adminNewQr = (id) => rpc('admin_new_qr', { p_id: id });
-export const adminAddAttendee = (id, phone, km, name) => rpc('admin_add_attendee', { p_id: id, p_phone: phone, p_km: km, p_name: name || null });
-export const adminRemoveAttendee = (id, memberId) => rpc('admin_remove_attendee', { p_id: id, p_member: memberId });
+export const adminAddAttendee = (id, phone, km, name, date) => rpc('admin_add_attendee', { p_id: id, p_phone: phone, p_km: km, p_name: name || null, p_date: date || null });
+export const adminRemoveAttendee = (id, memberId, date) => rpc('admin_remove_attendee', { p_id: id, p_member: memberId, p_date: date || null });
+export const adminEndEvent = (id, end = true) => rpc('admin_end_event', { p_id: id, p_end: end });
+export const adminListBadges = () => rpc('admin_list_badges');
+export const adminSaveBadge = (b) => rpc('admin_save_badge', { p: b });
 
 // Shrink big phone photos before upload (max 1600px, JPEG).
-async function shrink(file, max = 1600) {
+async function shrink(file, max = 1600, type = 'image/jpeg') {
   try {
     const bmp = await createImageBitmap(file);
     const scale = Math.min(1, max / Math.max(bmp.width, bmp.height));
@@ -206,15 +219,18 @@ async function shrink(file, max = 1600) {
     canvas.width = Math.round(bmp.width * scale);
     canvas.height = Math.round(bmp.height * scale);
     canvas.getContext('2d').drawImage(bmp, 0, 0, canvas.width, canvas.height);
-    const blob = await new Promise((r) => canvas.toBlob(r, 'image/jpeg', 0.85));
+    const blob = await new Promise((r) => canvas.toBlob(r, type, 0.85));
     return blob || file;
   } catch {
     return file;
   }
 }
 
-export async function uploadPoster(file) {
-  const blob = await shrink(file);
+// Badges keep their transparent background, so they stay PNG.
+export const uploadBadgeImage = (file) => uploadPoster(file, 600, 'image/png');
+
+export async function uploadPoster(file, max = 1600, as = 'image/jpeg') {
+  const blob = await shrink(file, max, as);
   const type = blob.type || 'image/jpeg';
   const ext = type === 'image/png' ? 'png' : type === 'image/webp' ? 'webp' : 'jpg';
   const path = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;

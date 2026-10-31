@@ -1,5 +1,5 @@
 import { Suspense, lazy, useCallback, useEffect, useState } from 'react';
-import { upcomingRuns, runDetail, checkInRun, shareRun, signUp, cancelSignup, claimPayment, prefill, readScan, messageFor, runDate, runTime, formatPhone } from './api.js';
+import { upcomingRuns, pastEvents, runDetail, checkInRun, shareRun, signUp, cancelSignup, claimPayment, prefill, readScan, messageFor, runDate, runTime, formatPhone } from './api.js';
 import { go, href } from './router.js';
 import Badge from './Badge.jsx';
 const Scanner = lazy(() => import('./Scanner.jsx'));
@@ -8,7 +8,10 @@ const digits = (p) => String(p || '').replace(/\D/g, '').slice(-10);
 // Checkbox answers are lists; everything else is text.
 export const answerText = (v) => (Array.isArray(v) ? v.join(', ') : String(v ?? ''));
 const isBlank = (v) => (Array.isArray(v) ? v.length === 0 : !String(v ?? '').trim());
-const isRun = (r) => r?.kind !== 'event';
+const isRun = (r) => (r?.kind ?? 'run') === 'run';
+const isProgram = (r) => r?.kind === 'program';
+const noun = (r) => (isProgram(r) ? 'program' : isRun(r) ? 'run' : 'event');
+const KIND_TAG = { event: 'Event', program: 'Program' };
 const holding = (r) => r?.my_status === 'pending' || r?.my_status === 'confirmed';
 const pending = (r) => r?.my_status === 'pending';
 const rupees = (n) => `₹${Number(n || 0).toLocaleString('en-IN')}`;
@@ -57,11 +60,12 @@ export function UpcomingRuns() {
                 <span className="run-card-copy">
                   <span className="run-when">
                     {r.is_today && <span className="today">Today</span>}
-                    {!isRun(r) && <span className="kind-tag">Event</span>}
-                    {when(r)}
+                    {KIND_TAG[r.kind] && <span className="kind-tag">{KIND_TAG[r.kind]}</span>}
+                    {isProgram(r) ? `Starts ${when(r)}` : when(r)}
                   </span>
                   <span className="run-name">{r.name}</span>
                   {r.venue && <span className="muted run-venue">{r.venue}</span>}
+                  {isProgram(r) && r.classes && <span className="muted run-venue">{r.classes} classes{r.my_classes ? ` · you've done ${r.my_classes}` : ''}</span>}
                   {r.price > 0 && <span className="price-tag">{rupees(r.price)}</span>}
                   {r.signed_up && <span className="signed-tag">✓ Signed up</span>}
                   {pending(r) && <span className="signed-tag pending-tag">{r.my_payment === 'claimed' ? 'Payment being checked' : 'Payment pending'}</span>}
@@ -73,6 +77,74 @@ export function UpcomingRuns() {
         </ul>
       )}
     </section>
+  );
+}
+
+// ---------- Past events (home) ----------
+export function PastEvents() {
+  const [list, setList] = useState(undefined);
+  const [all, setAll] = useState(false);
+  useEffect(() => { pastEvents().then(setList).catch(() => setList([])); }, []);
+  if (!list || list.length === 0) return null;
+  const shown = all ? list : list.slice(0, 5);
+  return (
+    <section aria-labelledby="past" className="past-section">
+      <h2 className="section-title" id="past">Past events</h2>
+      <ul className="past-list">
+        {shown.map((r) => (
+          <li key={r.id}>
+            <a href={href(`run/${r.id}`)}>
+              <span className="past-copy">
+                <span className="run-name">{r.name}</span>
+                <span className="muted">
+                  {KIND_TAG[r.kind] ? `${KIND_TAG[r.kind]} · ` : ''}{runDate(r.ended_on && isProgram(r) ? r.ended_on : r.date)}
+                </span>
+              </span>
+              {r.checked_in || r.my_classes > 0
+                ? <span className="signed-tag">{isProgram(r) ? `✓ ${r.my_classes}/${r.classes} classes` : '✓ Attended'}</span>
+                : <span className="chev" aria-hidden="true">›</span>}
+            </a>
+          </li>
+        ))}
+      </ul>
+      {list.length > 5 && !all && <button className="link inline" onClick={() => setAll(true)}>Show all {list.length}</button>}
+    </section>
+  );
+}
+
+// A program's progress: classes done, and the badge waiting at the end.
+export function ProgramProgress({ run }) {
+  const total = Number(run.classes || 0);
+  const done = Math.min(total, Number(run.my_classes || 0));
+  if (!total) return null;
+  return (
+    <section className="program-card" aria-label="Your progress">
+      <div className="program-top">
+        <div>
+          <p className="eyebrow">Your classes</p>
+          <p className="program-count"><strong>{done}</strong> of {total}</p>
+        </div>
+        {run.badge && <BadgeImg badge={run.badge} size={64} dim={!run.my_badge_earned} />}
+      </div>
+      <ol className="class-dots" aria-hidden="true">
+        {Array.from({ length: total }, (_, i) => <li key={i} className={i < done ? 'on' : ''} />)}
+      </ol>
+      {run.badge && (
+        <p className="muted">
+          {run.my_badge_earned
+            ? <>You've earned <strong>{run.badge.name}</strong>.</>
+            : <>Check in to all {total} classes to earn <strong>{run.badge.name}</strong>.</>}
+        </p>
+      )}
+    </section>
+  );
+}
+
+export function BadgeImg({ badge, size = 72, dim = false }) {
+  return (
+    <span className={`badge-img${dim ? ' dim' : ''}`} style={{ width: size, height: size }}>
+      {badge.image_url ? <img src={badge.image_url} alt={badge.name} /> : <span>{badge.name?.[0] || '★'}</span>}
+    </span>
   );
 }
 
@@ -118,16 +190,18 @@ export function RunPage({ id, profile }) {
         <article className="event">
           {run.poster_url && <img className="event-poster" src={run.poster_url} alt={`${run.name} poster`} />}
           <div className="event-copy">
-            {run.checked_in ? (
-              <p className="signed-banner"><span aria-hidden="true">✓</span> {isRun(run) ? `Run logged · ${kmText(run.my_checkin_km)} km` : 'Checked in'}</p>
+            {run.ended && <p className="ended-banner">{isProgram(run) ? 'Program ended' : 'Ended'}</p>}
+            {run.ended ? null : run.checked_in ? (
+              <p className="signed-banner"><span aria-hidden="true">✓</span> {isRun(run) ? `Run logged · ${kmText(run.my_checkin_km)} km` : isProgram(run) ? 'Checked in today' : 'Checked in'}</p>
             ) : run.signed_up && !run.is_past ? (
               <p className="signed-banner"><span aria-hidden="true">✓</span> You're signed up</p>
             ) : pending(run) && !run.is_past && (
               <p className="pending-banner">{run.my_payment === 'claimed' ? 'Waiting for payment confirmation' : 'Payment pending'}</p>
             )}
             <p className="eyebrow">
-              {run.is_today && <span className="today">Today</span>}
-              {when(run)}
+              {run.is_today && !isProgram(run) && <span className="today">Today</span>}
+              {KIND_TAG[run.kind] && <span className="kind-tag">{KIND_TAG[run.kind]}</span>}
+              {isProgram(run) ? `${run.is_today || run.check_in_live || run.is_past ? 'Started' : 'Starts'} ${when(run)}` : when(run)}
             </p>
             <h1 className="display">{run.name}</h1>
             {run.venue && (
@@ -142,24 +216,29 @@ export function RunPage({ id, profile }) {
               <a className="link inline" href={run.map_url} target="_blank" rel="noreferrer">Open in Maps</a>
             )}
             {run.description && <p className="event-desc">{run.description}</p>}
+            {isProgram(run) && run.classes && !run.my_classes && !holding(run) && (
+              <p className="spots">{run.classes} classes{run.badge ? ` · finish them all to earn ${run.badge.name}` : ''}</p>
+            )}
+            {isProgram(run) && (run.my_classes > 0 || holding(run)) && <ProgramProgress run={run} />}
             {run.price > 0 && !holding(run) && !run.is_past && (
               <p className="spots">{rupees(run.price)} · pay after you sign up</p>
             )}
             {!run.is_past && run.signup_enabled && run.capacity != null && !holding(run) && (
               <p className="spots">{run.spots_left > 0 ? `${run.spots_left} of ${run.capacity} spots left` : 'This one is full.'}</p>
             )}
-            {run.is_past && <p className="note">This {isRun(run) ? 'run' : 'event'} has finished.</p>}
-            {!run.is_past && !run.is_today && !run.signed_up && run.can_attend && (
-              <p className="hint">Check-in opens on the day. Scan the QR at the venue to check in.</p>
+            {run.is_past && <p className="note">This {noun(run)} has {run.ended ? 'ended' : 'finished'}.</p>}
+            {!run.is_past && !run.check_in_live && !run.signed_up && run.can_attend && (
+              <p className="hint">{isProgram(run) ? 'Check-in opens at the first class.' : 'Check-in opens on the day.'} Scan the QR at the venue to check in.</p>
             )}
+            {isProgram(run) && run.check_in_live && !run.checked_in && <p className="hint">Scan the QR at each class to check in.</p>}
             {run.is_today && !run.can_attend && <p className="hint">Check-in isn't open yet.</p>}
             {run.checked_in && run.is_today && isRun(run) && (
               <p className="hint">Wrong distance? Tap Attend run and scan the QR again to fix it.</p>
             )}
 
-            {holding(run) && run.price > 0 && <PayCard run={run} onChange={setRun} />}
+            {holding(run) && run.price > 0 && !run.is_past && <PayCard run={run} onChange={setRun} />}
 
-            {holding(run) && !run.is_past && !run.checked_in && (
+            {holding(run) && !run.is_past && !(run.checked_in && !isProgram(run)) && !(isProgram(run) && run.my_classes > 0) && (
               <div className="my-signup">
                 {answered.length > 0 && (
                   <dl className="confirm-facts">
@@ -243,22 +322,23 @@ export function ShareButton({ run, className = 'share-btn' }) {
 
 function RunActions({ run, loggedIn }) {
   if (run.is_past) return null;
-  const attendLive = run.is_today && run.can_attend;
+  const attendLive = run.check_in_live;
   const checkedIn = run.checked_in;
-  const attendLabel = isRun(run) ? 'Attend run' : 'Check in';
-  const attendLocked = !attendLive && run.signed_up && !run.is_today;
-  const canSignup = run.signup_enabled && !holding(run) && !checkedIn;
+  const attendLabel = isRun(run) ? 'Attend run' : isProgram(run) ? 'Check in to class' : 'Check in';
+  const attendLocked = !attendLive && run.signed_up && (isProgram(run) || !run.is_today);
+  const canSignup = run.signup_enabled && !holding(run) && !checkedIn && !(run.my_classes > 0);
   const full = canSignup && run.capacity != null && run.spots_left <= 0;
   if (!attendLive && !attendLocked && !canSignup) return null;
   const to = (path) => (loggedIn ? href(path) : href(`login?next=${path}`));
   return (
     <div className="dock">
       <div className="dock-inner">
-        {attendLive && !(checkedIn && !isRun(run)) && <a className={checkedIn ? 'btn ghost' : 'btn'} href={to(`run/${run.id}/scan`)}>{checkedIn ? (isRun(run) ? 'Scan again to fix distance' : 'Checked in ✓') : attendLabel}</a>}
+        {attendLive && !(checkedIn && !isRun(run)) && <a className={checkedIn ? 'btn ghost' : 'btn'} href={to(`run/${run.id}/scan`)}>{checkedIn ? 'Scan again to fix distance' : attendLabel}</a>}
+        {attendLive && checkedIn && isProgram(run) && <button className="btn" disabled>Checked in today ✓</button>}
         {attendLocked && (
           <div className="locked">
             <button className="btn" disabled aria-describedby="attend-note">{attendLabel}</button>
-            <p className="hint" id="attend-note">Activates on the day. Scan the QR at the venue to check in.</p>
+            <p className="hint" id="attend-note">{isProgram(run) ? 'Activates at the first class.' : 'Activates on the day.'} Scan the QR at the venue to check in.</p>
           </div>
         )}
         {canSignup && (full
@@ -440,7 +520,9 @@ function SignedUpScreen({ run, onDone }) {
           <div><dt>When</dt><dd>{when(run) || runDate(run.date)}</dd></div>
           {run.venue && <div><dt>Where</dt><dd>{run.venue}</dd></div>}
         </dl>
-        <div className="note"><p>On the day, open this {isRun(run) ? 'run' : 'event'} and tap <strong>{isRun(run) ? 'Attend run' : 'Check in'}</strong>, then scan the QR at the venue.</p></div>
+        <div className="note"><p>{isProgram(run)
+          ? <>At every class, open this program and tap <strong>Check in to class</strong>, then scan the QR at the venue.{run.badge ? <> Make all {run.classes} to earn <strong>{run.badge.name}</strong>.</> : ''}</>
+          : <>On the day, open this {noun(run)} and tap <strong>{isRun(run) ? 'Attend run' : 'Check in'}</strong>, then scan the QR at the venue.</>}</p></div>
       </div>
       <button className="btn" onClick={onDone}>Done</button>
     </main>
@@ -504,7 +586,7 @@ export function CheckInPage({ id, code, onLogged }) {
       .then((r) => {
         setRun(r);
         if (r) setKm(kmText(r.my_checkin_km ?? r.run_km ?? 5));
-        if (r && !r.is_today) setError(messageFor('not_today'));
+        if (r && !r.check_in_live) setError(messageFor(r.ended ? 'event_ended' : isProgram(r) && !r.is_past ? 'program_not_started' : 'not_today'));
       })
       .catch((e) => setError(messageFor(e.code)));
   }, [id]);
@@ -522,7 +604,7 @@ export function CheckInPage({ id, code, onLogged }) {
 
   if (result) return <RunLogged r={result} onDone={() => go('')} />;
 
-  const blocked = run === null || (run && !run.is_today);
+  const blocked = run === null || (run && !run.check_in_live);
   return (
     <main className="shell">
       <header className="topbar"><a className="link back" href={href(`run/${id}`)}>‹ Back</a></header>
@@ -531,7 +613,7 @@ export function CheckInPage({ id, code, onLogged }) {
       {run && (
         <div className="stack">
           <div>
-            <p className="eyebrow">{run.checked_in && isRun(run) ? 'Fix your distance' : 'Check in'}</p>
+            <p className="eyebrow">{run.checked_in && isRun(run) ? 'Fix your distance' : isProgram(run) ? `Class ${Math.min(Number(run.classes || 1), Number(run.my_classes || 0) + (run.checked_in ? 0 : 1))} of ${run.classes}` : 'Check in'}</p>
             <h1 className="display">{run.name}</h1>
             {run.venue && <p className="lede">{run.venue}</p>}
           </div>
@@ -549,7 +631,7 @@ export function CheckInPage({ id, code, onLogged }) {
           )}
           {error && <p className="error" role="alert">{error}</p>}
           {!blocked && <button className="btn" onClick={log} disabled={busy}>{busy ? 'Checking in…' : isRun(run) ? 'Log my run' : 'Check me in'}</button>}
-          {blocked && <a className="btn ghost" href={href(`run/${id}`)}>See the run</a>}
+          {blocked && <a className="btn ghost" href={href(`run/${id}`)}>See the {run ? noun(run) : 'event'}</a>}
         </div>
       )}
     </main>
@@ -557,6 +639,41 @@ export function CheckInPage({ id, code, onLogged }) {
 }
 
 function RunLogged({ r, onDone }) {
+  if (r.kind === 'program') {
+    const total = Number(r.classes || 0);
+    const done = Math.min(total || Infinity, Number(r.done || 0));
+    return (
+      <main className="shell confirm">
+        <div className="confirm-body">
+          <div className="tick" aria-hidden="true"><svg viewBox="0 0 52 52"><path d="M14 27l8 8 16-18" /></svg></div>
+          <h1 className="display">{r.first_time ? `Class ${done} done.` : 'Already in today.'}</h1>
+          <p className="lede">{r.first_time ? <>You're checked in to <strong>{r.run}</strong>.</> : <>You'd already checked in to <strong>{r.run}</strong> today. One check-in per class.</>}</p>
+          {total > 0 && (
+            <>
+              <p className="logged-km">{done}<span>of {total}</span></p>
+              <ol className="class-dots" aria-label={`${done} of ${total} classes`}>
+                {Array.from({ length: total }, (_, i) => <li key={i} className={i < done ? 'on' : ''} />)}
+              </ol>
+            </>
+          )}
+          {r.badge_earned && r.badge && (
+            <div className="unlock" role="status">
+              <BadgeImg badge={r.badge} size={96} />
+              <div>
+                <p className="eyebrow">New badge</p>
+                <p className="badge-name">{r.badge.name}</p>
+                <p className="muted">You finished every class. It's on your profile now.</p>
+              </div>
+            </div>
+          )}
+          {!r.badge_earned && r.badge && total > done && (
+            <p className="muted">{total - done} more {total - done === 1 ? 'class' : 'classes'} to earn <strong>{r.badge.name}</strong>.</p>
+          )}
+        </div>
+        <button className="btn" onClick={onDone}>Done</button>
+      </main>
+    );
+  }
   if (r.kind === 'event') {
     return (
       <main className="shell confirm">
