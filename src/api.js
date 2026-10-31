@@ -72,6 +72,8 @@ const MESSAGES = {
   badge_name_required: 'Give the badge a name.',
   badge_name_too_long: 'Keep the badge name under 60 characters.',
   badge_image_required: 'Add an image for the badge.',
+  member_not_found: "Couldn't find that member. Search again.",
+  bad_badge_date: "The date can't be in the future.",
 };
 export const messageFor = (code) => MESSAGES[code] ?? MESSAGES.server_error;
 
@@ -209,6 +211,11 @@ export const adminRemoveAttendee = (id, memberId, date) => rpc('admin_remove_att
 export const adminEndEvent = (id, end = true) => rpc('admin_end_event', { p_id: id, p_end: end });
 export const adminListBadges = () => rpc('admin_list_badges');
 export const adminSaveBadge = (b) => rpc('admin_save_badge', { p: b });
+export const adminBadgeDetail = (id) => rpc('admin_badge_detail', { p_id: id });
+export const adminFindMembers = (q, badgeId) => rpc('admin_find_members', { p_q: q, p_badge: badgeId || null });
+export const adminGiveBadge = (badgeId, { memberId = null, phone = null, name = null, note = null, on = null } = {}) =>
+  rpc('admin_give_badge', { p_badge: badgeId, p_member: memberId, p_phone: phone, p_name: name, p_note: note, p_on: on });
+export const adminTakeBadge = (badgeId, memberId) => rpc('admin_take_badge', { p_badge: badgeId, p_member: memberId });
 
 // Shrink big phone photos before upload (max 1600px, JPEG).
 async function shrink(file, max = 1600, type = 'image/jpeg') {

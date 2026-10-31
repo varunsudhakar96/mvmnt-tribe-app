@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import {
   adminListRuns, adminMembers, adminSetPayment, adminSaveRun, adminDeleteRun, adminNewQr, adminAddAttendee, adminRemoveAttendee, uploadPoster, normalisePhone,
-  adminEndEvent, adminListBadges, adminSaveBadge, uploadBadgeImage,
+  adminEndEvent, adminListBadges, adminSaveBadge, uploadBadgeImage, adminBadgeDetail, adminFindMembers, adminGiveBadge, adminTakeBadge,
   checkinLink, messageFor, runDate, runTime,
 } from './api.js';
 import { go, href } from './router.js';
@@ -26,6 +26,7 @@ function AdminTabs({ active }) {
     <nav className="tabs" aria-label="Admin sections">
       <a className={active === 'runs' ? 'on' : ''} href={href('admin')} aria-current={active === 'runs' ? 'page' : undefined}>Events</a>
       <a className={active === 'members' ? 'on' : ''} href={href('admin/members')} aria-current={active === 'members' ? 'page' : undefined}>Members</a>
+      <a className={active === 'badges' ? 'on' : ''} href={href('admin/badges')} aria-current={active === 'badges' ? 'page' : undefined}>Badges</a>
     </nav>
   );
 }
@@ -162,6 +163,197 @@ export function AdminMembers() {
             )}
           </>
         )}
+      </div>
+    </main>
+  );
+}
+
+// ---------- Badges ----------
+export function AdminBadges() {
+  const [badges, setBadges] = useState(undefined);
+  const [error, setError] = useState('');
+  const [adding, setAdding] = useState(false);
+  useEffect(() => { adminListBadges().then(setBadges).catch((e) => setError(messageFor(e.code))); }, []);
+  return (
+    <main className="shell">
+      <AdminBar />
+      <AdminTabs active="badges" />
+      <div className="stack">
+        <h1 className="display">Badges</h1>
+        <p className="muted">Program badges are given automatically when someone finishes every class. You can also give any badge by hand, for example to people who finished a program before the app.</p>
+        {!adding
+          ? <button className="btn" onClick={() => setAdding(true)}>+ New badge</button>
+          : <NewBadgeForm onCancel={() => setAdding(false)} onSaved={(b) => go(`admin/badge/${b.id}`)} />}
+        {error && <p className="error" role="alert">{error}</p>}
+        {!error && badges === undefined && <p className="muted">Loading…</p>}
+        {badges && badges.length === 0 && <p className="muted">No badges yet. Add one, or create it while setting up a program.</p>}
+        {badges && badges.length > 0 && (
+          <ul className="admin-list">
+            {badges.map((b) => (
+              <li key={b.id}>
+                <a href={href(`admin/badge/${b.id}`)}>
+                  <span className="badge-row">
+                    <BadgeImg badge={b} size={48} />
+                    <span className="badge-row-copy">
+                      <span className="run-name">{b.name}</span>
+                      <span className="muted">{b.awarded} {b.awarded === 1 ? 'person has it' : 'people have it'}{b.programs ? ` · used in ${b.programs} ${b.programs === 1 ? 'program' : 'programs'}` : ''}</span>
+                    </span>
+                  </span>
+                  <span className="chev" aria-hidden="true">›</span>
+                </a>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </main>
+  );
+}
+
+export function AdminBadgeDetail({ id }) {
+  const [badge, setBadge] = useState(undefined);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState('');
+  const [q, setQ] = useState('');
+  const [found, setFound] = useState([]);
+  const [note, setNote] = useState('');
+  const [on, setOn] = useState(today());
+  const [newPerson, setNewPerson] = useState(false);
+  const [phone, setPhone] = useState('');
+  const [name, setName] = useState('');
+  const [needName, setNeedName] = useState(false);
+  const [notice, setNotice] = useState('');
+  const [takeAsk, setTakeAsk] = useState('');
+
+  useEffect(() => { adminBadgeDetail(id).then(setBadge).catch((e) => setError(messageFor(e.code))); }, [id]);
+  useEffect(() => {
+    if (q.trim().length < 2) { setFound([]); return undefined; }
+    const t = setTimeout(() => { adminFindMembers(q, id).then(setFound).catch(() => setFound([])); }, 250);
+    return () => clearTimeout(t);
+  }, [q, id]);
+
+  async function give(args, who) {
+    setBusy(args.memberId || 'phone'); setError(''); setNotice('');
+    try {
+      setBadge(await adminGiveBadge(id, { ...args, note, on }));
+      setNotice(`${who} now has ${badge.name}.`);
+      setFound((list) => list.map((m) => (m.member_id === args.memberId ? { ...m, has_badge: true } : m)));
+      if (!args.memberId) { setPhone(''); setName(''); setNeedName(false); setNewPerson(false); }
+    } catch (e) {
+      if (e.code === 'name_needed') setNeedName(true);
+      setError(messageFor(e.code));
+    } finally { setBusy(''); }
+  }
+  async function take(m) {
+    setBusy(m.member_id); setError(''); setNotice('');
+    try { setBadge(await adminTakeBadge(id, m.member_id)); setTakeAsk(''); setNotice(`Took ${badge.name} back from ${m.name}.`); }
+    catch (e) { setError(messageFor(e.code)); } finally { setBusy(''); }
+  }
+
+  if (!badge) {
+    return (
+      <main className="shell">
+        <AdminBar back="admin/badges" label="‹ Badges" />
+        {error ? <p className="error" role="alert">{error}</p> : <p className="muted">Loading…</p>}
+      </main>
+    );
+  }
+  const holders = badge.holders || [];
+  return (
+    <main className="shell">
+      <AdminBar back="admin/badges" label="‹ Badges" />
+      <div className="stack">
+        <div className="badge-hero">
+          <BadgeImg badge={badge} size={96} />
+          <div>
+            <h1 className="display">{badge.name}</h1>
+            <p className="muted">{holders.length} {holders.length === 1 ? 'person has it' : 'people have it'}</p>
+          </div>
+        </div>
+        {badge.programs.length > 0 && (
+          <p className="hint">Given automatically for finishing: {badge.programs.map((p) => `${p.name}${p.classes ? ` (${p.classes} classes)` : ''}`).join(', ')}.</p>
+        )}
+
+        <section className="builder" aria-labelledby="give-h">
+          <h2 className="section-title" id="give-h">Give this badge</h2>
+          <input className="input" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search a name or number" aria-label="Search members" />
+          {q.trim().length >= 2 && found.length === 0 && <p className="muted small">Nobody found. Check the spelling, or add them by number below.</p>}
+          {found.length > 0 && (
+            <ul className="find-list">
+              {found.map((m) => (
+                <li key={m.member_id}>
+                  <span className="find-copy">
+                    <span>{m.name}{m.on_app && <span className="pill-mini">on app</span>}</span>
+                    <span className="muted small">{fmtPhone(m.phone)}</span>
+                  </span>
+                  {m.has_badge
+                    ? <span className="signed-tag">✓ Has it</span>
+                    : <button className="btn small-btn" disabled={!!busy} onClick={() => give({ memberId: m.member_id }, m.name)}>{busy === m.member_id ? '…' : 'Give'}</button>}
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="two">
+            <label className="field">
+              <span className="label">Earned on</span>
+              <input className="input" type="date" value={on} max={today()} onChange={(e) => setOn(e.target.value)} />
+            </label>
+            <label className="field">
+              <span className="label">Note</span>
+              <input className="input" value={note} maxLength={120} onChange={(e) => setNote(e.target.value)} placeholder="Sept batch" />
+            </label>
+          </div>
+          <span className="hint">The date and note apply to everyone you give it to from this screen. The member sees the badge and date on their profile.</span>
+          {!newPerson ? (
+            <button type="button" className="link inline" onClick={() => setNewPerson(true)}>Not in the list? Add by number</button>
+          ) : (
+            <div className="stack tight add-att">
+              <label className="field">
+                <span className="label">Their number</span>
+                <input className="input" type="tel" inputMode="numeric" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="98765 43210" />
+              </label>
+              {needName && (
+                <label className="field">
+                  <span className="label">Their name</span>
+                  <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
+                </label>
+              )}
+              <button className="btn" disabled={busy === 'phone'} onClick={() => {
+                const p = normalisePhone(phone);
+                if (!p) { setError(messageFor('invalid_phone')); return; }
+                give({ phone: p, name }, name || fmtPhone(p));
+              }}>{busy === 'phone' ? 'Giving…' : 'Give badge'}</button>
+              <button type="button" className="link" onClick={() => { setNewPerson(false); setNeedName(false); setError(''); }}>Cancel</button>
+            </div>
+          )}
+          {notice && !error && <p className="saved" role="status">{notice}</p>}
+          {error && <p className="error" role="alert">{error}</p>}
+        </section>
+
+        <section aria-labelledby="holders-h">
+          <h2 className="section-title" id="holders-h">Who has it · {holders.length}</h2>
+          {holders.length === 0 && <p className="muted">Nobody yet.</p>}
+          <ol className="su-list">
+            {holders.map((m) => (
+              <li key={m.member_id}>
+                <div className="su-row">
+                  <span>{m.name}</span>
+                  {takeAsk === m.member_id ? (
+                    <span className="att-right">
+                      <button className="link inline danger-link" onClick={() => take(m)} disabled={busy === m.member_id}>Yes, take back</button>
+                      <button className="link inline" onClick={() => setTakeAsk('')}>Keep</button>
+                    </span>
+                  ) : (
+                    <button className="link inline" onClick={() => setTakeAsk(m.member_id)} aria-label={`Take back from ${m.name}`}>Take back</button>
+                  )}
+                </div>
+                <span className="muted small">
+                  {fmtPhone(m.phone)} · {dayMonth(m.on)} · {m.how === 'auto' ? `finished ${m.note || 'the program'}` : `given by you${m.note ? ` · ${m.note}` : ''}`}
+                </span>
+              </li>
+            ))}
+          </ol>
+        </section>
       </div>
     </main>
   );
@@ -519,31 +711,49 @@ function Field({ label, hint, required, children }) {
 }
 
 // ---------- Badge picker (badges are saved and reusable) ----------
-function BadgePicker({ value, classes, onChange }) {
-  const [badges, setBadges] = useState(undefined);
-  const [adding, setAdding] = useState(false);
+function NewBadgeForm({ onSaved, onCancel }) {
   const [name, setName] = useState('');
   const [img, setImg] = useState('');
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const fileRef = useRef(null);
-
-  useEffect(() => { adminListBadges().then(setBadges).catch((e) => { setBadges([]); setError(messageFor(e.code)); }); }, []);
-
   async function pick(e) {
     const file = e.target.files?.[0]; e.target.value = '';
     if (!file) return;
     setBusy('img'); setError('');
     try { setImg(await uploadBadgeImage(file)); } catch (err) { setError(messageFor(err.code)); } finally { setBusy(''); }
   }
-  async function saveBadge() {
+  async function save() {
     setBusy('save'); setError('');
-    try {
-      const b = await adminSaveBadge({ name, image_url: img });
-      setBadges((list) => [b, ...(list || [])]);
-      onChange(b.id); setAdding(false); setName(''); setImg('');
-    } catch (err) { setError(messageFor(err.code)); } finally { setBusy(''); }
+    try { onSaved(await adminSaveBadge({ name, image_url: img })); }
+    catch (err) { setError(messageFor(err.code)); } finally { setBusy(''); }
   }
+  return (
+    <div className="new-badge stack tight">
+      <div className="new-badge-row">
+        <button type="button" className={`badge-drop${img ? ' has' : ''}`} onClick={() => fileRef.current?.click()} disabled={busy === 'img'} aria-label="Badge image">
+          {img ? <img src={img} alt="New badge" /> : <span>{busy === 'img' ? 'Uploading…' : 'Add image'}</span>}
+        </button>
+        <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={pick} />
+        <label className="field grow">
+          <span className="label">Badge name</span>
+          <input className="input" value={name} maxLength={60} onChange={(e) => setName(e.target.value)} placeholder="Animal Flow · Level 1" />
+        </label>
+      </div>
+      <span className="hint">A square PNG with a transparent background looks best. Saved badges can be reused for later programs.</span>
+      <button type="button" className="btn" onClick={save} disabled={!!busy}>{busy === 'save' ? 'Saving…' : 'Save badge'}</button>
+      <button type="button" className="link" onClick={onCancel}>Cancel</button>
+      {error && <p className="error" role="alert">{error}</p>}
+    </div>
+  );
+}
+
+function BadgePicker({ value, classes, onChange }) {
+  const [badges, setBadges] = useState(undefined);
+  const [adding, setAdding] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => { adminListBadges().then(setBadges).catch((e) => { setBadges([]); setError(messageFor(e.code)); }); }, []);
 
   const chosen = (badges || []).find((b) => b.id === value);
   return (
@@ -573,21 +783,8 @@ function BadgePicker({ value, classes, onChange }) {
       {!adding ? (
         <button type="button" className="btn ghost" onClick={() => setAdding(true)}>+ New badge</button>
       ) : (
-        <div className="new-badge stack tight">
-          <div className="new-badge-row">
-            <button type="button" className={`badge-drop${img ? ' has' : ''}`} onClick={() => fileRef.current?.click()} disabled={busy === 'img'} aria-label="Badge image">
-              {img ? <img src={img} alt="New badge" /> : <span>{busy === 'img' ? 'Uploading…' : 'Add image'}</span>}
-            </button>
-            <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={pick} />
-            <label className="field grow">
-              <span className="label">Badge name</span>
-              <input className="input" value={name} maxLength={60} onChange={(e) => setName(e.target.value)} placeholder="Animal Flow · Level 1" />
-            </label>
-          </div>
-          <span className="hint">A square PNG with a transparent background looks best. Saved badges can be reused for later programs.</span>
-          <button type="button" className="btn" onClick={saveBadge} disabled={!!busy}>{busy === 'save' ? 'Saving…' : 'Save badge'}</button>
-          <button type="button" className="link" onClick={() => { setAdding(false); setError(''); }}>Cancel</button>
-        </div>
+        <NewBadgeForm onCancel={() => setAdding(false)}
+                      onSaved={(b) => { setBadges((list) => [b, ...(list || [])]); onChange(b.id); setAdding(false); }} />
       )}
       {error && <p className="error" role="alert">{error}</p>}
     </div>

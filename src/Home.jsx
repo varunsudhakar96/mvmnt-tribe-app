@@ -8,6 +8,8 @@ import Landing from './Landing.jsx';
 import Avatar from './Avatar.jsx';
 const AdminRuns = lazy(() => import('./Admin.jsx').then((m) => ({ default: m.AdminRuns })));
 const AdminMembers = lazy(() => import('./Admin.jsx').then((m) => ({ default: m.AdminMembers })));
+const AdminBadges = lazy(() => import('./Admin.jsx').then((m) => ({ default: m.AdminBadges })));
+const AdminBadgeDetail = lazy(() => import('./Admin.jsx').then((m) => ({ default: m.AdminBadgeDetail })));
 const AdminRunEdit = lazy(() => import('./Admin.jsx').then((m) => ({ default: m.AdminRunEdit })));
 const Wait = ({ children }) => (
   <Suspense fallback={<main className="shell"><p className="muted">Loading…</p></main>}>{children}</Suspense>
@@ -60,6 +62,8 @@ export default function Home() {
       if (!profile.is_admin) return <NotAllowed />;
       if (b === 'run' && c) return <Wait><AdminRunEdit id={c} /></Wait>;
       if (b === 'members') return <Wait><AdminMembers /></Wait>;
+      if (b === 'badges') return <Wait><AdminBadges /></Wait>;
+      if (b === 'badge' && c) return <Wait><AdminBadgeDetail id={c} /></Wait>;
       return <Wait><AdminRuns /></Wait>;
     }
     if (a !== 'me') return <Landing profile={profile} />;
