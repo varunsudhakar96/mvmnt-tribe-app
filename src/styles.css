@@ -783,15 +783,38 @@ select.input { appearance: none; background-image: linear-gradient(45deg, transp
 .lb-list li.top-3 .lb-avatar { background: #e3a578; border-color: #cf8b5b; }
 .lb-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
 .lb-name { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.lb-progress .bar { height: 4px; }
+.lb-progress { display: block; }
+.lb-progress .bar, .lb-me .bar { display: block; height: 4px; }
 .lb-sub { display: flex; gap: 8px; align-items: center; font-size: 13px; min-width: 0; }
 .lb-sub .muted { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .lb-tier { flex: none; font-family: var(--display); font-weight: 800; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; padding: 1px 7px; border-radius: 6px; color: #fff; }
-.tier-pacer.lb-tier { background: #b8732e; }
-.tier-strider.lb-tier { background: #6b7a8f; }
-.tier-ranger.lb-tier { background: #2f7d4f; }
-.tier-wayfarer.lb-tier { background: #2c5aa0; }
-.tier-voyager.lb-tier { background: #6d3fa8; }
+/* Same colours as the original leaderboard and the medals: Pacer orange, Strider purple holo, Ranger red, Wayfarer green, Voyager pearl */
+:root {
+  --t-pacer: linear-gradient(135deg, #f0c27a, #c4842a 55%, #8a5a1c);
+  --t-strider: linear-gradient(100deg, #ff6ec4, #7873f5 38%, #7873f5 62%, #06b6d4);
+  --t-ranger: linear-gradient(135deg, #ff6b6b, #f43f5e 50%, #be123c);
+  --t-wayfarer: linear-gradient(135deg, #6ee7b7, #34d399 45%, #059669);
+  --t-voyager: linear-gradient(100deg, #ffffff, #d7c9ff 50%, #c9ecff);
+}
+.tier-pacer.lb-tier { background: var(--t-pacer); }
+.tier-strider.lb-tier { background: var(--t-strider); }
+.tier-ranger.lb-tier { background: var(--t-ranger); }
+.tier-wayfarer.lb-tier { background: var(--t-wayfarer); }
+.tier-voyager.lb-tier { background: var(--t-voyager); color: #3b2a6b; box-shadow: inset 0 0 0 1px #c9bdf0; }
+.lb-tier { text-shadow: 0 1px 1px rgba(0, 0, 0, 0.18); }
+.tier-voyager.lb-tier { text-shadow: none; }
+/* progress bar takes the runner's tier colour */
+.lb-list li.t-pacer .bar span { background: var(--t-pacer); }
+.lb-list li.t-strider .bar span { background: var(--t-strider); }
+.lb-list li.t-ranger .bar span { background: var(--t-ranger); }
+.lb-list li.t-wayfarer .bar span { background: var(--t-wayfarer); }
+.lb-list li.t-voyager .bar span { background: linear-gradient(90deg, #b9a6f5, #8fd3f5); }
+/* selected filter chip takes the tier colour */
+.lb-chip.on.tier-pacer { background: var(--t-pacer); border-color: #c4842a; color: #fff; }
+.lb-chip.on.tier-strider { background: var(--t-strider); border-color: #7873f5; color: #fff; }
+.lb-chip.on.tier-ranger { background: var(--t-ranger); border-color: #f43f5e; color: #fff; }
+.lb-chip.on.tier-wayfarer { background: var(--t-wayfarer); border-color: #059669; color: #fff; }
+.lb-chip.on.tier-voyager { background: var(--t-voyager); border-color: #c9bdf0; color: #3b2a6b; }
 .lb-km { flex: none; text-align: right; display: flex; flex-direction: column; line-height: 1; }
 .lb-km strong { font-family: var(--display); font-weight: 900; font-size: 24px; font-variant-numeric: tabular-nums; }
 .lb-km small { font-size: 12px; color: var(--muted); font-weight: 600; }

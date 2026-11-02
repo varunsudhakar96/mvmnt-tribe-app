@@ -107,7 +107,7 @@ export default function Leaderboard({ profile }) {
             {shown.map((r) => {
               const step = nextStep(r.km);
               return (
-                <li key={`${r.rank}-${r.name}`} className={`${r.me ? 'me ' : ''}${r.rank <= 3 ? `top top-${r.rank}` : ''}`}>
+                <li key={`${r.rank}-${r.name}`} className={`${r.me ? 'me ' : ''}${r.rank <= 3 ? `top top-${r.rank} ` : ''}${r.tier ? `t-${r.tier.toLowerCase()}` : ''}`}>
                   <span className="lb-rank">{r.rank}</span>
                   <span className="lb-avatar" aria-hidden="true">{initials(r.name)}</span>
                   <span className="lb-copy">
