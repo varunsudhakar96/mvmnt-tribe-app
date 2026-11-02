@@ -1,5 +1,5 @@
 import { Suspense, lazy, useCallback, useEffect, useState } from 'react';
-import { getProfile, logOut, messageFor, uploadAvatar } from './api.js';
+import { getProfile, logOut, messageFor, uploadAvatar, runDate, runTime } from './api.js';
 import { useRoute, href } from './router.js';
 import Wordmark from './Wordmark.jsx';
 import Badge from './Badge.jsx';
@@ -50,6 +50,9 @@ export default function Home() {
 
   useEffect(() => { load(); }, [load]);
   const { parts, query } = useRoute();
+  // Opening the profile refreshes it, so a booking made a moment ago shows up under Upcoming.
+  const onMe = parts[0] === 'me';
+  useEffect(() => { if (onMe) load(); }, [onMe, load]);
 
   // Came back from "Log in to sign up": continue to where they were going.
   useEffect(() => {
@@ -150,8 +153,36 @@ function Dashboard({ p }) {
   const progress = next ? Math.min(100, Math.max(0, ((total - prev) / (next - prev)) * 100)) : 100;
   const firstName = (p.name || '').split(' ')[0];
 
+  const rupees = (n) => `₹${Number(n || 0).toLocaleString('en-IN')}`;
   return (
     <div className="dash">
+      {p.upcoming?.length > 0 && (
+        <section aria-labelledby="upcoming-h" className="up-section">
+          <h2 className="section-title" id="upcoming-h">Upcoming · {p.upcoming.length}</h2>
+          <ul className="up-list">
+            {p.upcoming.map((u) => (
+              <li key={u.id} className="up-card">
+                <a className="up-copy" href={href(`run/${u.id}`)}>
+                  <span className="muted small">
+                    {u.is_today && <span className="today">Today</span>}
+                    {[runDate(u.date), runTime(u.time)].filter(Boolean).join(' · ')}
+                  </span>
+                  <span className="run-name">{u.name}</span>
+                  {u.venue && <span className="muted small">{u.venue}</span>}
+                  <span className="up-tags">
+                    {u.payment === 'venue' && <span className="pending-tag">Pay {rupees(u.price)} at the venue</span>}
+                    {u.price > 0 && u.payment === 'confirmed' && <span className="signed-tag">✓ Paid</span>}
+                    {u.price > 0 && u.payment === 'claimed' && <span className="pending-tag">Payment being checked</span>}
+                    {u.kind === 'program' && u.classes && <span className="muted small">{Math.min(u.my_classes, u.classes)}/{u.classes} classes</span>}
+                  </span>
+                </a>
+                <a className="btn small-btn up-ticket" href={href(`run/${u.id}/ticket`)}>Show ticket</a>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       <section aria-labelledby="hello">
         <p className="eyebrow" id="hello">Hi, {firstName}</p>
         <p className="hero-km">

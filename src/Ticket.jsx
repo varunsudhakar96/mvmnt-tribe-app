@@ -9,6 +9,8 @@ const when = (r) => [runDate(r.date, { weekday: 'long', day: 'numeric', month: '
 // The ticket: name, event, a QR the organiser scans, and the code in case the camera can't.
 export function Ticket({ run, name, onDone, backHref }) {
   const [qr, setQr] = useState('');
+  const [png, setPng] = useState(null); // the ticket as an image, ready before the tap so the share sheet opens straight away
+  const [canShare, setCanShare] = useState(false);
   const [saved, setSaved] = useState('');
   const code = run.my_ticket;
   const venueDue = run.my_payment === 'venue' && run.price > 0;
@@ -20,9 +22,13 @@ export function Ticket({ run, name, onDone, backHref }) {
     QRCode.toDataURL(ticketLink(code), { width: 640, margin: 1, errorCorrectionLevel: 'M' }).then(setQr).catch(() => setQr(''));
   }, [code]);
 
-  async function save() {
-    try {
-      const img = new Image(); img.src = qr; await img.decode();
+  // Build the ticket image as soon as the QR is ready.
+  useEffect(() => {
+    if (!qr) return;
+    let dead = false;
+    (async () => {
+      try {
+        const img = new Image(); img.src = qr; await img.decode();
       const W = 1080, H = 1500;
       const c = document.createElement('canvas'); c.width = W; c.height = H;
       const g = c.getContext('2d');
@@ -44,14 +50,34 @@ export function Ticket({ run, name, onDone, backHref }) {
       g.font = '500 32px Barlow, Arial, sans-serif'; g.fillStyle = '#6b6b6b';
       g.fillText(venueDue ? `Pay ${rupees(run.price)} at the venue` : paid ? `Paid ${rupees(run.price)}` : 'Show this at the door', W / 2, 1360);
       g.fillText('mvmnttribe', W / 2, 1440);
-      const a = document.createElement('a');
-      a.href = c.toDataURL('image/png');
-      a.download = `ticket-${run.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}.png`;
-      a.click();
-      setSaved('Saved to your photos');
+      const blob = await new Promise((r) => c.toBlob(r, 'image/png'));
+      if (!dead && blob) {
+        const file = new File([blob], `ticket-${run.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}.png`, { type: 'image/png' });
+        setPng(file);
+        setCanShare(!!navigator.share && !!navigator.canShare && navigator.canShare({ files: [file] }));
+      }
+      } catch { /* the on-screen ticket still works; the button will say so */ }
+    })();
+    return () => { dead = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qr]);
+
+  async function save() {
+    if (!png) { setSaved("Couldn't make the image. Take a screenshot instead."); return; }
+    try {
+      if (canShare) {
+        // Opens the phone's share sheet: AirDrop, WhatsApp, Save Image, etc.
+        await navigator.share({ files: [png], title: `Ticket · ${run.name}` });
+        return;
+      }
+      const url = URL.createObjectURL(png);
+      const a = document.createElement('a'); a.href = url; a.download = png.name; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      setSaved('Downloaded');
       setTimeout(() => setSaved(''), 2500);
-    } catch {
-      setSaved("Couldn't save. Take a screenshot instead.");
+    } catch (e) {
+      if (e?.name === 'AbortError') return; // they closed the share sheet
+      setSaved("Couldn't share. Take a screenshot instead.");
     }
   }
 
@@ -79,7 +105,7 @@ export function Ticket({ run, name, onDone, backHref }) {
         </div>
       </section>
       <div className="stack tight">
-        <button className="btn" onClick={save} disabled={!qr}>Save as image</button>
+        <button className="btn" onClick={save} disabled={!png}>{canShare ? 'Save or share ticket' : 'Save as image'}</button>
         {saved && <p className="saved center" role="status">{saved}</p>}
         {onDone && <button className="btn ghost" onClick={onDone}>Done</button>}
       </div>

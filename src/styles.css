@@ -893,3 +893,12 @@ select.input { appearance: none; background-image: linear-gradient(45deg, transp
 .scan-name { font-weight: 800; font-size: 26px; }
 .scan-due { display: flex; flex-direction: column; gap: 10px; width: 100%; margin-top: 6px; }
 .scan-result .btn { margin-top: 10px; }
+
+/* ---- Profile: upcoming tickets ---- */
+.up-section { margin-bottom: 30px; }
+.up-list { list-style: none; display: flex; flex-direction: column; gap: 10px; }
+.up-card { display: flex; align-items: center; gap: 12px; padding: 14px 14px 14px 16px; border: 1.5px solid var(--ink); border-radius: 16px; }
+.up-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; color: inherit; text-decoration: none; }
+.up-copy .run-name { font-size: 18px; }
+.up-tags { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 2px; }
+.up-ticket { flex: none; height: 40px; padding: 0 14px; }
