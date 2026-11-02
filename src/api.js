@@ -79,7 +79,7 @@ const MESSAGES = {
   bad_file_type: 'Upload a photo (JPG, PNG, HEIC) or a PDF.',
   // online payment
   payments_not_ready: "Online payment isn't switched on yet. Please message the organiser.",
-  payment_cancelled: 'Payment not completed. Your spot is held for 30 minutes; tap Pay to try again.',
+  payment_cancelled: 'Payment not completed, so nothing was booked. Tap Pay to try again.',
   order_failed: "Couldn't start the payment. Try again in a minute.",
   bad_signature: "We couldn't confirm that payment. If money left your account, it will show here within a few minutes; otherwise message the organiser.",
   payment_not_complete: 'The payment is still processing. Refresh in a minute.',
@@ -90,6 +90,11 @@ const MESSAGES = {
   amount_mismatch: "That payment amount doesn't match. Please message the organiser.",
   checkout_failed: "Razorpay didn't load. Check your connection and try again.",
   bad_price: 'Online payments need a price of at least ₹1.',
+  venue_not_allowed: "Pay at venue isn't available for this one.",
+  ticket_only: 'For this event the organiser scans your ticket. Open My ticket and show it at the door.',
+  ticket_not_found: "That isn't a Mvmnt Tribe ticket, or the code is wrong.",
+  ticket_cancelled: 'This ticket was cancelled.',
+  wrong_event: 'This ticket is for a different event.',
 };
 export const messageFor = (code) => MESSAGES[code] ?? MESSAGES.server_error;
 
@@ -246,7 +251,7 @@ export const pastEvents = () => rpc('past_events');
 export const leaderboard = () => rpc('public_leaderboard');
 export const runDetail = (id) => rpc('run_detail', { p_id: id });
 export const attendRun = (id, code) => rpc('attend_run', { p_id: id, p_code: code });
-export const signUp = (id, answers) => rpc('sign_up_for_run', { p_id: id, p_answers: answers });
+export const signUp = (id, answers, venue = false) => rpc('sign_up_for_run', { p_id: id, p_answers: answers, p_venue: venue });
 export const cancelSignup = (id) => rpc('cancel_signup', { p_id: id });
 export const claimPayment = (id) => rpc('claim_payment', { p_id: id });
 export const checkInRun = (id, code, km) => rpc('check_in_run', { p_id: id, p_code: code, p_km: km });
@@ -262,6 +267,10 @@ export function prefill(url, { name, phone } = {}) {
 }
 
 // A venue QR is a link back into this app: <site>/#/run/<id>/checkin?c=<code>
+export function ticketLink(code) {
+  const base = `${window.location.origin}${window.location.pathname}`;
+  return `${base}#/ticket/${code}`;
+}
 export function checkinLink(id, code) {
   const base = `${window.location.origin}${window.location.pathname}`;
   return `${base}#/run/${id}/checkin?c=${code}`;
@@ -271,6 +280,8 @@ export function readScan(text) {
   const t = String(text || '').trim();
   const m = t.match(/#\/run\/([0-9a-f-]{36})\/checkin\?c=([0-9a-z]+)/i);
   if (m) return { kind: 'checkin', id: m[1], code: m[2] };
+  const tk = t.match(/#\/ticket\/(MT-?[A-Z0-9]{6})\b/i) || t.match(/^(MT-?[A-Z0-9]{6})$/i);
+  if (tk) return { kind: 'ticket', code: tk[1].toUpperCase() };
   if (/^https:\/\/(docs\.google\.com\/forms\/|forms\.gle\/)/i.test(t)) return { kind: 'form', url: t };
   return { kind: 'unknown' };
 }
@@ -284,6 +295,7 @@ export const adminDeleteRun = (id) => rpc('admin_delete_run', { p_id: id });
 export const adminNewQr = (id) => rpc('admin_new_qr', { p_id: id });
 export const adminAddAttendee = (id, phone, km, name, date) => rpc('admin_add_attendee', { p_id: id, p_phone: phone, p_km: km, p_name: name || null, p_date: date || null });
 export const adminRemoveAttendee = (id, memberId, date) => rpc('admin_remove_attendee', { p_id: id, p_member: memberId, p_date: date || null });
+export const adminScanTicket = (code, eventId, km) => rpc('admin_scan_ticket', { p_code: code, p_event: eventId || null, p_km: km ?? null });
 export const adminEndEvent = (id, end = true) => rpc('admin_end_event', { p_id: id, p_end: end });
 export const adminListBadges = () => rpc('admin_list_badges');
 export const adminSaveBadge = (b) => rpc('admin_save_badge', { p: b });

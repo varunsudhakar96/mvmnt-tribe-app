@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
+const Scanner = lazy(() => import('./Scanner.jsx'));
 import QRCode from 'qrcode';
 import {
   adminListRuns, adminMembers, adminSetPayment, adminSaveRun, adminDeleteRun, adminNewQr, adminAddAttendee, adminRemoveAttendee, uploadPoster, normalisePhone,
-  adminEndEvent, adminListBadges, adminSaveBadge, uploadBadgeImage, adminBadgeDetail, adminFindMembers, adminGiveBadge, adminTakeBadge, signedFileUrls,
+  adminEndEvent, adminListBadges, adminSaveBadge, uploadBadgeImage, adminBadgeDetail, adminFindMembers, adminGiveBadge, adminTakeBadge, signedFileUrls, adminScanTicket, readScan,
   checkinLink, messageFor, runDate, runTime,
 } from './api.js';
 import { go, href } from './router.js';
@@ -427,7 +428,8 @@ function AdminGroup({ title, runs, empty }) {
 
 // ---------- Add / edit ----------
 const EMPTY = { kind: 'run', name: '', date: '', time: '06:00', venue: '', map_url: '', description: '', run_km: '5', poster_url: '',
-  signup_enabled: true, signup_fields: [], capacity: '', price: '', payment_qr_url: '', upi_id: '', classes: '', badge_id: '', payment_mode: 'online' };
+  signup_enabled: true, signup_fields: [], capacity: '', price: '', payment_qr_url: '', upi_id: '', classes: '', badge_id: '', payment_mode: 'online', pay_at_venue: false, checkin_mode: 'venue_qr' };
+const CHECKIN = [['venue_qr', 'They scan the venue QR'], ['ticket', 'You scan their ticket'], ['both', 'Either']];
 const KIND_LABEL = { run: 'Run', event: 'Event', program: 'Program' };
 const KIND_HINT = {
   run: "Check-ins log km toward runners' totals and badges.",
@@ -464,7 +466,7 @@ export function AdminRunEdit({ id }) {
         setSaved(r);
         setForm({ ...EMPTY, ...Object.fromEntries(Object.keys(EMPTY).map((k) => [k, r[k] ?? ''])),
                   price: r.price ? String(r.price) : '', kind: r.kind || 'run',
-                  classes: r.classes ? String(r.classes) : '', badge_id: r.badge_id || '', payment_mode: r.payment_mode || 'manual' });
+                  classes: r.classes ? String(r.classes) : '', badge_id: r.badge_id || '', payment_mode: r.payment_mode || 'manual', pay_at_venue: !!r.pay_at_venue, checkin_mode: r.checkin_mode || 'venue_qr' });
       })
       .catch((e) => setError(messageFor(e.code)));
   }, [id, isNew]);
@@ -609,6 +611,20 @@ export function AdminRunEdit({ id }) {
 
         <SignupBuilder form={form} setForm={setForm} hasSignups={(saved?.signup_count || 0) > 0} />
 
+        <fieldset className="field type-pick">
+          <legend className="label">How do people check in?</legend>
+          <div className="seg three-seg checkin-seg" role="radiogroup">
+            {CHECKIN.map(([v, l]) => (
+              <button key={v} type="button" role="radio" aria-checked={form.checkin_mode === v} className={form.checkin_mode === v ? 'on' : ''}
+                      onClick={() => setForm((f) => ({ ...f, checkin_mode: v }))}>{l}</button>
+            ))}
+          </div>
+          <span className="hint">{form.checkin_mode === 'ticket'
+            ? 'Everyone who signs up gets a ticket with a QR. At the door you tap Scan tickets and point your camera at each one. No venue QR needed.'
+            : form.checkin_mode === 'both' ? 'You can scan tickets at the door, and people can also scan the venue QR themselves.'
+            : 'You print the venue QR; people open the app and scan it to check in.'}</span>
+        </fieldset>
+
         {!isEvent && (
           <Field label="Distance (km)" hint="What a QR check-in logs by default. Runners can change it if they ran more or less.">
             <input className="input" inputMode="decimal" value={form.run_km ?? ''} placeholder="5"
@@ -632,9 +648,18 @@ export function AdminRunEdit({ id }) {
                         onClick={() => setForm((f) => ({ ...f, payment_mode: 'manual' }))}>UPI QR</button>
               </div>
               <span className="hint">{form.payment_mode === 'online'
-                ? 'Razorpay: UPI, cards, netbanking. Sign-ups confirm automatically once paid. Unpaid sign-ups free their spot after 30 minutes. Razorpay keeps about 2.36%.'
-                : 'People pay your UPI QR and tap "I\'ve paid"; you mark each one paid. No fees.'}</span>
+                ? 'Razorpay: UPI, cards, netbanking. The spot is booked only when the payment goes through. Razorpay keeps about 2.36%.'
+                : 'People sign up, pay your UPI QR and tap "I\'ve paid"; you mark each one paid. No fees.'}</span>
             </fieldset>
+          )}
+          {Number(form.price) > 0 && form.payment_mode === 'online' && (
+            <label className="toggle-row">
+              <input type="checkbox" checked={!!form.pay_at_venue} onChange={(e) => setForm((f) => ({ ...f, pay_at_venue: e.target.checked }))} />
+              <span>
+                <strong>Allow pay at the venue</strong>
+                <small>Adds a second button: "Sign up, pay at the venue". Those people hold a spot and show as "Pay at venue" until you mark them paid.</small>
+              </span>
+            </label>
           )}
           {Number(form.price) > 0 && form.payment_mode !== 'online' && (
             <>
@@ -670,7 +695,14 @@ export function AdminRunEdit({ id }) {
 
       {!isNew && saved && <Attendance run={saved} onChange={setSaved} />}
       {!isNew && saved && <Signups run={saved} onChange={setSaved} />}
-      {!isNew && saved && !saved.ended && <VenueQr run={saved} onChange={setSaved} />}
+      {!isNew && saved && !saved.ended && saved.checkin_mode !== 'venue_qr' && (
+        <section className="qr-card" aria-labelledby="scan-h">
+          <h2 className="section-title" id="scan-h">Scan tickets</h2>
+          <p className="muted">At the door, point your camera at each person's ticket QR. It checks them in and tells you if money is due.</p>
+          <a className="btn" href={href(`admin/scan?e=${saved.id}`)}>Scan tickets</a>
+        </section>
+      )}
+      {!isNew && saved && !saved.ended && saved.checkin_mode !== 'ticket' && <VenueQr run={saved} onChange={setSaved} />}
 
       {!isNew && saved && (
         <section className="end-zone" aria-labelledby="end-h">
@@ -1090,7 +1122,7 @@ function DayAttendance({ run, onChange }) {
 }
 
 // ---------- Who has signed up ----------
-const PAY_LABEL = { none: 'Not paid', claimed: 'Says paid', confirmed: 'Paid' };
+const PAY_LABEL = { none: 'Not paid', claimed: 'Says paid', confirmed: 'Paid', venue: 'Pay at venue' };
 const payState = (p) => (p.status === 'confirmed' && (p.payment || 'none') !== 'confirmed' ? 'confirmed' : (p.payment || 'none'));
 
 function Signups({ run, onChange }) {
@@ -1141,7 +1173,7 @@ function Signups({ run, onChange }) {
         Signed up · {confirmedN}{run.capacity != null ? ` of ${run.capacity}` : ''}{pendingN ? ` · ${pendingN} pending` : ''}
       </h2>
       {paid && online && list.length > 0 && (
-        <p className="hint">{rupees(run.price)} each, paid in the app · {list.filter((p) => p.payment_ref).length} paid online · {list.filter((p) => p.status === 'pending' && p.holds !== false).length} waiting to pay. Unpaid sign-ups free their spot after 30 minutes; you can still mark someone paid by hand.</p>
+        <p className="hint">{rupees(run.price)} each · {list.filter((p) => p.status === 'confirmed').length} paid{run.pay_at_venue ? ` · ${list.filter((p) => p.payment === 'venue').length} paying at the venue` : ''}. Spots are booked only once paid{run.pay_at_venue ? ' or marked pay-at-venue' : ''}.</p>
       )}
       {paid && !online && list.length > 0 && (
         <p className="hint">{rupees(run.price)} each · {counts.confirmed || 0} paid · {counts.claimed || 0} say paid, check and confirm · {counts.none || 0} not paid yet. Pending people hold a spot until you confirm or remove them.</p>
@@ -1158,7 +1190,8 @@ function Signups({ run, onChange }) {
                   <div className="pay-row">
                     <span className={`pay-chip pay-${p.status === 'pending' && p.holds === false ? 'cancelled' : payState(p)}`}>
                       {p.payment_ref ? `Paid online · ${rupees(p.amount || run.price)}`
-                        : p.status === 'pending' ? (online ? (p.holds === false ? 'Didn\'t pay · spot released' : 'Waiting to pay') : `Pending · ${PAY_LABEL[payState(p)].toLowerCase()}`)
+                        : p.payment === 'venue' ? `Pay at venue · ${rupees(run.price)} due`
+                        : p.status === 'pending' ? `Pending · ${PAY_LABEL[payState(p)].toLowerCase()}`
                         : PAY_LABEL[payState(p)]}
                     </span>
                     {p.status === 'pending' ? (
@@ -1258,5 +1291,89 @@ function VenueQr({ run, onChange }) {
       )}
       {error && <p className="error" role="alert">{error}</p>}
     </section>
+  );
+}
+
+// ---------- Scan tickets at the door ----------
+export function AdminScan({ eventId, code }) {
+  const [phase, setPhase] = useState(code ? 'busy' : 'scan'); // scan | busy | result | error
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState('');
+  const [typed, setTyped] = useState('');
+  const [count, setCount] = useState(0);
+  const [busyPay, setBusyPay] = useState(false);
+  const [camErr, setCamErr] = useState('');
+
+  const lookup = useCallback(async (raw) => {
+    const s = readScan(raw);
+    if (s.kind !== 'ticket') { setError(messageFor('ticket_not_found')); setPhase('error'); return; }
+    setPhase('busy'); setError('');
+    try {
+      const r = await adminScanTicket(s.code, eventId || null);
+      setResult(r);
+      if (r.ok && !r.already) setCount((c) => c + 1);
+      setPhase('result');
+    } catch (e) { setError(messageFor(e.code)); setPhase('error'); }
+  }, [eventId]);
+
+  useEffect(() => { if (code) lookup(code); }, [code, lookup]);
+
+  async function markPaid() {
+    setBusyPay(true);
+    try { await adminSetPayment(result.event_id, result.member_id, 'confirmed'); setResult((r) => ({ ...r, payment: 'confirmed', status: 'confirmed', due: 0 })); }
+    catch (e) { setError(messageFor(e.code)); }
+    finally { setBusyPay(false); }
+  }
+  const back = eventId ? href(`admin/run/${eventId}`) : href('admin');
+  const ok = result?.ok;
+
+  return (
+    <main className="shell scan-shell">
+      <header className="topbar">
+        <a className="link back" href={back}>‹ Back</a>
+        <span className="admin-tag">{count} checked in</span>
+      </header>
+      <h1 className="display">Scan tickets</h1>
+      {phase === 'scan' && (
+        <>
+          <p className="lede">Point the camera at a ticket QR.</p>
+          {camErr
+            ? <p className="note">{camErr} You can still type the code from the ticket.</p>
+            : <Suspense fallback={<div className="scanner" />}><Scanner onResult={lookup} onError={(c) => setCamErr(messageFor(c))} /></Suspense>}
+          <form className="row code-row" onSubmit={(e) => { e.preventDefault(); if (typed.trim()) lookup(typed.trim()); }}>
+            <input className="input" value={typed} onChange={(e) => setTyped(e.target.value.toUpperCase())} placeholder="or type the code, e.g. MT-ABC123" aria-label="Ticket code" autoCapitalize="characters" autoCorrect="off" />
+            <button className="btn small-btn" type="submit" disabled={!typed.trim()}>Go</button>
+          </form>
+        </>
+      )}
+      {phase === 'busy' && <p className="status">Checking…</p>}
+      {phase === 'result' && result && (
+        <div className={`scan-result ${ok ? (result.already ? 'again' : 'ok') : 'bad'}`} role="status">
+          <p className="scan-big">{ok ? (result.already ? 'Already in' : 'Checked in') : messageFor(result.error)}</p>
+          <p className="scan-name">{result.name}</p>
+          <p className="muted">{result.event}{result.phone ? ` · ${result.phone}` : ''}</p>
+          {ok && result.kind === 'program' && result.classes && <p className="muted">Class {Math.min(result.done, result.classes)} of {result.classes}{result.badge ? ' · badge earned' : ''}</p>}
+          {ok && result.kind === 'run' && result.km != null && <p className="muted">Logged {Number(result.km)} km</p>}
+          {ok && result.due > 0 && (
+            <div className="scan-due">
+              <p className="pending-banner">Collect {rupees(result.due)}{result.payment === 'venue' ? ' · pay at venue' : ''}</p>
+              <button className="btn" onClick={markPaid} disabled={busyPay}>{busyPay ? 'Saving…' : 'Mark paid'}</button>
+            </div>
+          )}
+          {ok && result.due === 0 && result.payment === 'confirmed' && <p className="signed-banner"><span aria-hidden="true">✓</span> Paid</p>}
+          {!ok && result.error === 'wrong_event' && result.event_id && (
+            <a className="link inline" href={href(`admin/scan?e=${result.event_id}`)}>Switch to {result.event}</a>
+          )}
+          {error && <p className="error" role="alert">{error}</p>}
+          <button className="btn" onClick={() => { setResult(null); setError(''); setPhase('scan'); }}>Scan next</button>
+        </div>
+      )}
+      {phase === 'error' && (
+        <div className="stack scan-error">
+          <p className="error" role="alert">{error}</p>
+          <button className="btn" onClick={() => { setError(''); setPhase('scan'); }}>Scan again</button>
+        </div>
+      )}
+    </main>
   );
 }

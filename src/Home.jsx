@@ -8,6 +8,8 @@ import Landing from './Landing.jsx';
 import Avatar from './Avatar.jsx';
 import Leaderboard from './Leaderboard.jsx';
 import Events from './Events.jsx';
+import TicketPage, { TicketLanding } from './Ticket.jsx';
+const AdminScan = lazy(() => import('./Admin.jsx').then((m) => ({ default: m.AdminScan })));
 const AdminRuns = lazy(() => import('./Admin.jsx').then((m) => ({ default: m.AdminRuns })));
 const AdminMembers = lazy(() => import('./Admin.jsx').then((m) => ({ default: m.AdminMembers })));
 const AdminBadges = lazy(() => import('./Admin.jsx').then((m) => ({ default: m.AdminBadges })));
@@ -58,6 +60,8 @@ export default function Home() {
     const [a, b, c] = parts;
     if (a === 'run' && b && c === 'scan') return <ScanPage id={b} profile={profile} />;
     if (a === 'run' && b && c === 'signup') return <SignupPage id={b} profile={profile} />;
+    if (a === 'run' && b && c === 'ticket') return <TicketPage id={b} profile={profile} />;
+    if (a === 'ticket' && b) return <TicketLanding code={b} profile={profile} />;
     if (a === 'run' && b && c === 'checkin') return <CheckInPage id={b} code={query.get('c') || ''} onLogged={load} />;
     if (a === 'run' && b) return <RunPage id={b} profile={profile} />;
     if (a === 'leaderboard') return <Leaderboard profile={profile} />;
@@ -67,6 +71,7 @@ export default function Home() {
       if (b === 'run' && c) return <Wait><AdminRunEdit id={c} /></Wait>;
       if (b === 'members') return <Wait><AdminMembers /></Wait>;
       if (b === 'badges') return <Wait><AdminBadges /></Wait>;
+      if (b === 'scan') return <Wait><AdminScan eventId={query.get('e') || ''} code={query.get('t') || ''} /></Wait>;
       if (b === 'badge' && c) return <Wait><AdminBadgeDetail id={c} /></Wait>;
       return <Wait><AdminRuns /></Wait>;
     }

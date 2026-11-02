@@ -2,6 +2,7 @@ import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react'
 import { upcomingRuns, pastEvents, runDetail, checkInRun, shareRun, signUp, cancelSignup, claimPayment, payOnline, uploadSignupFile, prefill, readScan, messageFor, runDate, runTime, formatPhone } from './api.js';
 import { go, href } from './router.js';
 import Badge from './Badge.jsx';
+import { Ticket } from './Ticket.jsx';
 const Scanner = lazy(() => import('./Scanner.jsx'));
 
 const digits = (p) => String(p || '').replace(/\D/g, '').slice(-10);
@@ -14,6 +15,10 @@ const noun = (r) => (isProgram(r) ? 'program' : isRun(r) ? 'run' : 'event');
 const KIND_TAG = { event: 'Event', program: 'Program' };
 const holding = (r) => r?.my_status === 'pending' || r?.my_status === 'confirmed';
 const pending = (r) => r?.my_status === 'pending';
+const online = (r) => r?.payment_mode === 'online';
+const venueDue = (r) => r?.my_payment === 'venue';
+const ticketScan = (r) => r?.checkin_mode === 'ticket' || r?.checkin_mode === 'both';
+const venueScan = (r) => r?.checkin_mode !== 'ticket';
 const rupees = (n) => `₹${Number(n || 0).toLocaleString('en-IN')}`;
 const upiLink = (r) => `upi://pay?pa=${encodeURIComponent(r.upi_id)}&pn=${encodeURIComponent('Mvmnt Tribe')}&am=${Number(r.price || 0)}&cu=INR&tn=${encodeURIComponent(r.name.slice(0, 40))}`;
 const kmText = (n) => { const v = Number(n || 0); return Number.isInteger(v) ? String(v) : String(+v.toFixed(2)); };
@@ -68,7 +73,7 @@ export function UpcomingRuns() {
                   {isProgram(r) && r.classes && <span className="muted run-venue">{r.classes} classes{r.my_classes ? ` · you've done ${r.my_classes}` : ''}</span>}
                   {r.price > 0 && <span className="price-tag">{rupees(r.price)}</span>}
                   {r.signed_up && <span className="signed-tag">✓ Signed up</span>}
-                  {pending(r) && <span className="signed-tag pending-tag">{r.my_payment === 'claimed' ? 'Payment being checked' : 'Payment pending'}</span>}
+                  {pending(r) && <span className="signed-tag pending-tag">{venueDue(r) ? 'Signed up · pay at venue' : r.my_payment === 'claimed' ? 'Payment being checked' : 'Payment pending'}</span>}
                 </span>
                 <span className="chev" aria-hidden="true">›</span>
               </a>
@@ -196,7 +201,7 @@ export function RunPage({ id, profile }) {
             ) : run.signed_up && !run.is_past ? (
               <p className="signed-banner"><span aria-hidden="true">✓</span> You're signed up</p>
             ) : pending(run) && !run.is_past && (
-              <p className="pending-banner">{run.my_payment === 'claimed' ? 'Waiting for payment confirmation' : 'Payment pending'}</p>
+              <p className="pending-banner">{venueDue(run) ? `Signed up · pay ${rupees(run.price)} at the venue` : run.my_payment === 'claimed' ? 'Waiting for payment confirmation' : 'Payment pending'}</p>
             )}
             <p className="eyebrow">
               {run.is_today && !isProgram(run) && <span className="today">Today</span>}
@@ -221,16 +226,17 @@ export function RunPage({ id, profile }) {
             )}
             {isProgram(run) && (run.my_classes > 0 || holding(run)) && <ProgramProgress run={run} />}
             {run.price > 0 && !holding(run) && !run.is_past && (
-              <p className="spots">{rupees(run.price)} · pay after you sign up</p>
+              <p className="spots">{rupees(run.price)}{online(run) ? (run.pay_at_venue ? ' · pay in the app or at the venue' : ' · pay in the app to book') : ' · pay after you sign up'}</p>
             )}
             {!run.is_past && run.signup_enabled && run.capacity != null && !holding(run) && (
               <p className="spots">{run.spots_left > 0 ? `${run.spots_left} of ${run.capacity} spots left` : 'This one is full.'}</p>
             )}
             {run.is_past && <p className="note">This {noun(run)} has {run.ended ? 'ended' : 'finished'}.</p>}
-            {!run.is_past && !run.check_in_live && !run.signed_up && run.can_attend && (
+            {!run.is_past && !run.check_in_live && !run.signed_up && run.can_attend && venueScan(run) && (
               <p className="hint">{isProgram(run) ? 'Check-in opens at the first class.' : 'Check-in opens on the day.'} Scan the QR at the venue to check in.</p>
             )}
-            {isProgram(run) && run.check_in_live && !run.checked_in && <p className="hint">Scan the QR at each class to check in.</p>}
+            {isProgram(run) && run.check_in_live && !run.checked_in && venueScan(run) && <p className="hint">Scan the QR at each class to check in.</p>}
+            {holding(run) && !run.is_past && !venueScan(run) && <p className="hint">The organiser scans your ticket at the door{isProgram(run) ? ' at every class' : ''}.</p>}
             {run.is_today && !run.can_attend && <p className="hint">Check-in isn't open yet.</p>}
             {run.checked_in && run.is_today && isRun(run) && (
               <p className="hint">Wrong distance? Tap Attend run and scan the QR again to fix it.</p>
@@ -248,6 +254,7 @@ export function RunPage({ id, profile }) {
                   </dl>
                 )}
                 <div className="row">
+                  {run.my_ticket && <a className="link inline" href={href(`run/${run.id}/ticket`)}>My ticket</a>}
                   {(run.signup_fields || []).length > 0 && (
                     <a className="link inline" href={href(`run/${run.id}/signup`)}>Change answers</a>
                   )}
@@ -275,7 +282,9 @@ function PayCard({ run, onChange }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const status = run.my_payment || 'none';
-  if (run.payment_mode === 'online' && status !== 'confirmed') {
+  if (online(run)) {
+    if (status === 'confirmed') return <p className="pay-done"><span aria-hidden="true">✓</span> Paid {rupees(run.price)}. Thank you.</p>;
+    if (status !== 'venue') return null; // a checkout in progress is nothing yet
     const pay = async () => {
       setBusy(true); setErr('');
       try { onChange(await payOnline(run.id)); }
@@ -284,10 +293,9 @@ function PayCard({ run, onChange }) {
     };
     return (
       <section className="pay-card" aria-labelledby="pay-title">
-        <h2 className="section-title" id="pay-title">Pay {rupees(run.price)}</h2>
-        <p className="muted">Your spot is held for 30 minutes. Pay with any UPI app, card or netbanking to confirm it.</p>
-        <button className="btn" onClick={pay} disabled={busy}>{busy ? 'Opening payment…' : `Pay ${rupees(run.price)}`}</button>
-        <p className="hint center">Secure payment by Razorpay. You'll get a confirmation on WhatsApp.</p>
+        <h2 className="section-title" id="pay-title">Pay at the venue</h2>
+        <p className="muted">You've chosen to pay {rupees(run.price)} at the venue. You can also pay now in the app if that's easier.</p>
+        <button className="btn ghost" onClick={pay} disabled={busy}>{busy ? 'Opening payment…' : `Pay ${rupees(run.price)} now`}</button>
         {err && <p className={err === messageFor('payment_cancelled') ? 'note' : 'error'} role="alert">{err}</p>}
       </section>
     );
@@ -339,19 +347,21 @@ export function ShareButton({ run, className = 'share-btn' }) {
 
 function RunActions({ run, loggedIn }) {
   if (run.is_past) return null;
-  const attendLive = run.check_in_live;
+  const attendLive = run.check_in_live && venueScan(run);
   const checkedIn = run.checked_in;
   const attendLabel = isRun(run) ? 'Attend run' : isProgram(run) ? 'Check in to class' : 'Check in';
-  const attendLocked = !attendLive && run.signed_up && (isProgram(run) || !run.is_today);
+  const attendLocked = !attendLive && run.signed_up && venueScan(run) && (isProgram(run) || !run.is_today);
+  const showTicket = holding(run) && !venueScan(run) && !(checkedIn && !isProgram(run));
   const canSignup = run.signup_enabled && !holding(run) && !checkedIn && !(run.my_classes > 0);
   const full = canSignup && run.capacity != null && run.spots_left <= 0;
-  if (!attendLive && !attendLocked && !canSignup) return null;
+  if (!attendLive && !attendLocked && !canSignup && !showTicket) return null;
   const to = (path) => (loggedIn ? href(path) : href(`login?next=${path}`));
   return (
     <div className="dock">
       <div className="dock-inner">
         {attendLive && !(checkedIn && !isRun(run)) && <a className={checkedIn ? 'btn ghost' : 'btn'} href={to(`run/${run.id}/scan`)}>{checkedIn ? 'Scan again to fix distance' : attendLabel}</a>}
         {attendLive && checkedIn && isProgram(run) && <button className="btn" disabled>Checked in today ✓</button>}
+        {showTicket && <a className="btn" href={href(`run/${run.id}/ticket`)}>Show my ticket</a>}
         {attendLocked && (
           <div className="locked">
             <button className="btn" disabled aria-describedby="attend-note">{attendLabel}</button>
@@ -360,7 +370,7 @@ function RunActions({ run, loggedIn }) {
         )}
         {canSignup && (full
           ? <button className="btn" disabled>Full</button>
-          : <a className={attendLive ? 'btn ghost' : 'btn'} href={to(`run/${run.id}/signup`)}>Sign up</a>)}
+          : <a className={attendLive ? 'btn ghost' : 'btn'} href={to(`run/${run.id}/signup`)}>{run.price > 0 && online(run) ? `Pay ${rupees(run.price)} & sign up` : 'Sign up'}</a>)}
         {!loggedIn && (canSignup || attendLive) && (
           <p className="hint center">You'll log in with your number first.</p>
         )}
@@ -388,26 +398,37 @@ export function SignupPage({ id, profile }) {
   const fields = run?.signup_fields || [];
   const set = (fid, v) => { setAnswers((a) => ({ ...a, [fid]: v })); setMissing((m) => m.filter((x) => x !== fid)); setError(''); };
 
-  async function submit(e) {
-    e.preventDefault();
+  const payFirst = run && run.price > 0 && online(run) && !holding(run);
+
+  async function submit(e, how = 'default') {
+    e?.preventDefault?.();
     const miss = fields.filter((f) => f.required && isBlank(answers[f.id])).map((f) => f.id);
     setMissing(miss);
     if (miss.length) { setError(messageFor('answer_required')); return; }
-    setBusy(true); setError('');
+    setBusy(how); setError('');
     try {
       const clean = Object.fromEntries(fields
         .map((f) => [f.id, f.type === 'checkboxes' ? (answers[f.id] || []) : String(answers[f.id] ?? '').trim()])
         .filter(([, v]) => !isBlank(v)));
-      setDone(await signUp(id, clean));
+      if (payFirst && how === 'pay') {
+        await signUp(id, clean, false);          // reserve the spot while they pay (invisible unless paid)
+        try { setDone(await payOnline(id)); }
+        catch (err) {
+          if (err.code === 'payment_cancelled') await cancelSignup(id).catch(() => {});
+          throw err;
+        }
+      } else {
+        setDone(await signUp(id, clean, payFirst && how === 'venue'));
+      }
     } catch (err) {
       setError(messageFor(err.code));
     } finally {
-      setBusy(false);
+      setBusy('');
     }
   }
 
-  if (done && pending(done)) return <PendingScreen run={done} onChange={setDone} onDone={() => go(`run/${id}`)} />;
-  if (done) return <SignedUpScreen run={done} onDone={() => go(`run/${id}`)} />;
+  if (done && pending(done) && !online(done)) return <PendingScreen run={done} onChange={setDone} onDone={() => go(`run/${id}`)} />;
+  if (done) return <Ticket run={done} name={profile?.name} onDone={() => go(`run/${id}`)} />;
 
   const editing = holding(run);
   const closed = run && (run.is_past || !run.signup_enabled);
@@ -440,11 +461,24 @@ export function SignupPage({ id, profile }) {
                       onBusy={(b) => setUploading((u) => (b ? [...u, f.id] : u.filter((x) => x !== f.id)))} />
           ))}
 
-          {error && run && <p className="error" role="alert">{error}</p>}
-          {!closed && !full && (
-            <button className="btn" type="submit" disabled={busy || uploading.length > 0}>
+          {error && run && <p className={error === messageFor('payment_cancelled') ? 'note' : 'error'} role="alert">{error}</p>}
+          {!closed && !full && !payFirst && (
+            <button className="btn" type="submit" disabled={!!busy || uploading.length > 0}>
               {busy ? 'Saving…' : uploading.length ? 'Uploading…' : editing ? 'Save answers' : 'Confirm sign-up'}
             </button>
+          )}
+          {!closed && !full && payFirst && (
+            <div className="stack tight">
+              <button className="btn" type="button" onClick={(e) => submit(e, 'pay')} disabled={!!busy || uploading.length > 0}>
+                {busy === 'pay' ? 'Opening payment…' : uploading.length ? 'Uploading…' : `Pay ${rupees(run.price)} & sign up`}
+              </button>
+              {run.pay_at_venue && (
+                <button className="btn ghost" type="button" onClick={(e) => submit(e, 'venue')} disabled={!!busy || uploading.length > 0}>
+                  {busy === 'venue' ? 'Saving…' : 'Sign up, pay at the venue'}
+                </button>
+              )}
+              <p className="hint center">Your spot is booked only once you pay{run.pay_at_venue ? ', or choose to pay at the venue' : ''}. Secure payment by Razorpay.</p>
+            </div>
           )}
         </form>
       )}
@@ -564,28 +598,6 @@ function PendingScreen({ run, onChange, onDone }) {
   );
 }
 
-function SignedUpScreen({ run, onDone }) {
-  return (
-    <main className="shell confirm">
-      <div className="confirm-body">
-        <div className="tick" aria-hidden="true">
-          <svg viewBox="0 0 52 52"><path d="M14 27l8 8 16-18" /></svg>
-        </div>
-        <h1 className="display">You're in.</h1>
-        <p className="lede">You're signed up for <strong>{run.name}</strong>.</p>
-        <dl className="confirm-facts">
-          <div><dt>When</dt><dd>{when(run) || runDate(run.date)}</dd></div>
-          {run.venue && <div><dt>Where</dt><dd>{run.venue}</dd></div>}
-        </dl>
-        <div className="note"><p>{isProgram(run)
-          ? <>At every class, open this program and tap <strong>Check in to class</strong>, then scan the QR at the venue.{run.badge ? <> Make all {run.classes} to earn <strong>{run.badge.name}</strong>.</> : ''}</>
-          : <>On the day, open this {noun(run)} and tap <strong>{isRun(run) ? 'Attend run' : 'Check in'}</strong>, then scan the QR at the venue.</>}</p></div>
-      </div>
-      <button className="btn" onClick={onDone}>Done</button>
-    </main>
-  );
-}
-
 // ---------- Attend: scan the venue QR ----------
 export function ScanPage({ id, profile }) {
   const [state, setState] = useState({ phase: 'scan' });
@@ -643,7 +655,8 @@ export function CheckInPage({ id, code, onLogged }) {
       .then((r) => {
         setRun(r);
         if (r) setKm(kmText(r.my_checkin_km ?? r.run_km ?? 5));
-        if (r && !r.check_in_live) setError(messageFor(r.ended ? 'event_ended' : isProgram(r) && !r.is_past ? 'program_not_started' : 'not_today'));
+        if (r && !venueScan(r)) setError(messageFor('ticket_only'));
+        else if (r && !r.check_in_live) setError(messageFor(r.ended ? 'event_ended' : isProgram(r) && !r.is_past ? 'program_not_started' : 'not_today'));
       })
       .catch((e) => setError(messageFor(e.code)));
   }, [id]);
@@ -661,7 +674,7 @@ export function CheckInPage({ id, code, onLogged }) {
 
   if (result) return <RunLogged r={result} onDone={() => go('')} />;
 
-  const blocked = run === null || (run && !run.check_in_live);
+  const blocked = run === null || (run && (!run.check_in_live || !venueScan(run)));
   return (
     <main className="shell">
       <header className="topbar"><a className="link back" href={href(`run/${id}`)}>‹ Back</a></header>
