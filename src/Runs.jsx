@@ -81,9 +81,9 @@ export function UpcomingRuns() {
 }
 
 // ---------- Past events (home) ----------
-export function PastEvents() {
+export function PastEvents({ showAll = false }) {
   const [list, setList] = useState(undefined);
-  const [all, setAll] = useState(false);
+  const [all, setAll] = useState(showAll);
   useEffect(() => { pastEvents().then(setList).catch(() => setList([])); }, []);
   if (!list || list.length === 0) return null;
   const shown = all ? list : list.slice(0, 5);

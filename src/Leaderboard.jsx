@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { leaderboard, messageFor } from './api.js';
 import { href } from './router.js';
+import Menu from './Menu.jsx';
 
 const TIERS = [
   { key: 'VOYAGER', km: 300 }, { key: 'WAYFARER', km: 200 }, { key: 'RANGER', km: 100 },
@@ -54,7 +55,7 @@ export default function Leaderboard({ profile }) {
   return (
     <main className="shell">
       <header className="topbar">
-        <a className="link back" href={href('')}>‹ Home</a>
+        <Menu profile={profile} />
         {!profile && <a className="link" href={href('login?next=leaderboard')}>Log in</a>}
       </header>
 
@@ -129,29 +130,5 @@ export default function Leaderboard({ profile }) {
         </>
       )}
     </main>
-  );
-}
-
-// Compact top-3 for the home page.
-export function TopRunners() {
-  const [top, setTop] = useState(null);
-  useEffect(() => { leaderboard().then((d) => setTop((d?.runners || []).slice(0, 3))).catch(() => setTop([])); }, []);
-  if (!top || top.length === 0) return null;
-  return (
-    <section aria-labelledby="top-runners" className="top-runners">
-      <div className="section-row">
-        <h2 className="section-title" id="top-runners">Leaderboard</h2>
-        <a className="link inline" href={href('leaderboard')}>See all ›</a>
-      </div>
-      <a className="top-card" href={href('leaderboard')}>
-        {top.map((r, i) => (
-          <span key={r.name} className="top-row">
-            <span className="lb-rank">{i + 1}</span>
-            <span className="lb-name">{r.name}</span>
-            <span className="lb-km"><strong>{kmText(r.km)}</strong><small>km</small></span>
-          </span>
-        ))}
-      </a>
-    </section>
   );
 }

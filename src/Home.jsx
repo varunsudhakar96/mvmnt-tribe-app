@@ -7,6 +7,7 @@ import { RunPage, ScanPage, CheckInPage, SignupPage, BadgeImg } from './Runs.jsx
 import Landing from './Landing.jsx';
 import Avatar from './Avatar.jsx';
 import Leaderboard from './Leaderboard.jsx';
+import Events from './Events.jsx';
 const AdminRuns = lazy(() => import('./Admin.jsx').then((m) => ({ default: m.AdminRuns })));
 const AdminMembers = lazy(() => import('./Admin.jsx').then((m) => ({ default: m.AdminMembers })));
 const AdminBadges = lazy(() => import('./Admin.jsx').then((m) => ({ default: m.AdminBadges })));
@@ -60,6 +61,7 @@ export default function Home() {
     if (a === 'run' && b && c === 'checkin') return <CheckInPage id={b} code={query.get('c') || ''} onLogged={load} />;
     if (a === 'run' && b) return <RunPage id={b} profile={profile} />;
     if (a === 'leaderboard') return <Leaderboard profile={profile} />;
+    if (a === 'events') return <Events profile={profile} />;
     if (a === 'admin') {
       if (!profile.is_admin) return <NotAllowed />;
       if (b === 'run' && c) return <Wait><AdminRunEdit id={c} /></Wait>;

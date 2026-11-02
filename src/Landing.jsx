@@ -1,7 +1,7 @@
 import Wordmark from './Wordmark.jsx';
 import Avatar from './Avatar.jsx';
 import { UpcomingRuns, PastEvents } from './Runs.jsx';
-import { TopRunners } from './Leaderboard.jsx';
+import Menu from './Menu.jsx';
 import { href } from './router.js';
 
 // The main page for everyone: the quote, the runs, and Log in (or your photo once logged in).
@@ -9,7 +9,7 @@ export default function Landing({ profile }) {
   return (
     <main className="shell">
       <header className="topbar">
-        <Wordmark small />
+        <span className="top-left"><Menu profile={profile} /><Wordmark small /></span>
         {profile === undefined ? <span className="avatar-btn" aria-hidden="true" /> : profile ? (
           <a className="avatar-btn" href={href('me')} aria-label="Your runs and badges">
             <Avatar name={profile.name} url={profile.avatar_url} size={40} />
@@ -25,7 +25,6 @@ export default function Landing({ profile }) {
       </section>
 
       <UpcomingRuns />
-      <TopRunners />
       <PastEvents />
     </main>
   );

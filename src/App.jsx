@@ -7,6 +7,7 @@ import Wordmark from './Wordmark.jsx';
 import { RunPage } from './Runs.jsx';
 import Landing from './Landing.jsx';
 import Leaderboard from './Leaderboard.jsx';
+import Events from './Events.jsx';
 
 export default function App() {
   // undefined = still checking for a saved login
@@ -33,6 +34,7 @@ export default function App() {
   if (!a) return <Landing profile={null} />;
   if (a === 'run' && b && !c) return <RunPage id={b} profile={null} />;
   if (a === 'leaderboard') return <Leaderboard profile={null} />;
+  if (a === 'events') return <Events profile={null} />;
 
   // Everything else needs a login. After logging in, Home picks up where they were going.
   const next = a === 'login' ? query.get('next') || '' : parts.join('/');
