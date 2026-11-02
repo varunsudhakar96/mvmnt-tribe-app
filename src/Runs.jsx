@@ -1,12 +1,12 @@
-import { Suspense, lazy, useCallback, useEffect, useState } from 'react';
-import { upcomingRuns, pastEvents, runDetail, checkInRun, shareRun, signUp, cancelSignup, claimPayment, prefill, readScan, messageFor, runDate, runTime, formatPhone } from './api.js';
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
+import { upcomingRuns, pastEvents, runDetail, checkInRun, shareRun, signUp, cancelSignup, claimPayment, payOnline, uploadSignupFile, prefill, readScan, messageFor, runDate, runTime, formatPhone } from './api.js';
 import { go, href } from './router.js';
 import Badge from './Badge.jsx';
 const Scanner = lazy(() => import('./Scanner.jsx'));
 
 const digits = (p) => String(p || '').replace(/\D/g, '').slice(-10);
 // Checkbox answers are lists; everything else is text.
-export const answerText = (v) => (Array.isArray(v) ? v.join(', ') : String(v ?? ''));
+export const answerText = (v, f) => (f?.type === 'file' ? (v ? 'File uploaded' : '') : Array.isArray(v) ? v.join(', ') : String(v ?? ''));
 const isBlank = (v) => (Array.isArray(v) ? v.length === 0 : !String(v ?? '').trim());
 const isRun = (r) => (r?.kind ?? 'run') === 'run';
 const isProgram = (r) => r?.kind === 'program';
@@ -243,7 +243,7 @@ export function RunPage({ id, profile }) {
                 {answered.length > 0 && (
                   <dl className="confirm-facts">
                     {answered.map((f) => (
-                      <div key={f.id}><dt>{f.label}</dt><dd>{answerText(run.my_answers[f.id])}</dd></div>
+                      <div key={f.id}><dt>{f.label}</dt><dd>{f.type === 'file' ? '✓ Uploaded' : answerText(run.my_answers[f.id])}</dd></div>
                     ))}
                   </dl>
                 )}
@@ -275,6 +275,23 @@ function PayCard({ run, onChange }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const status = run.my_payment || 'none';
+  if (run.payment_mode === 'online' && status !== 'confirmed') {
+    const pay = async () => {
+      setBusy(true); setErr('');
+      try { onChange(await payOnline(run.id)); }
+      catch (e) { setErr(messageFor(e.code)); }
+      finally { setBusy(false); }
+    };
+    return (
+      <section className="pay-card" aria-labelledby="pay-title">
+        <h2 className="section-title" id="pay-title">Pay {rupees(run.price)}</h2>
+        <p className="muted">Your spot is held for 30 minutes. Pay with any UPI app, card or netbanking to confirm it.</p>
+        <button className="btn" onClick={pay} disabled={busy}>{busy ? 'Opening payment…' : `Pay ${rupees(run.price)}`}</button>
+        <p className="hint center">Secure payment by Razorpay. You'll get a confirmation on WhatsApp.</p>
+        {err && <p className={err === messageFor('payment_cancelled') ? 'note' : 'error'} role="alert">{err}</p>}
+      </section>
+    );
+  }
   async function claim() {
     setBusy(true); setErr('');
     try { onChange(await claimPayment(run.id)); } catch (e) { setErr(messageFor(e.code)); } finally { setBusy(false); }
@@ -360,6 +377,7 @@ export function SignupPage({ id, profile }) {
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(null);
   const [missing, setMissing] = useState([]);
+  const [uploading, setUploading] = useState([]);
 
   useEffect(() => {
     runDetail(id)
@@ -418,13 +436,14 @@ export function SignupPage({ id, profile }) {
           {full && <p className="note">{messageFor('run_full')}</p>}
 
           {!closed && !full && fields.map((f) => (
-            <Question key={f.id} f={f} value={answers[f.id] ?? ''} onChange={(v) => set(f.id, v)} invalid={missing.includes(f.id)} />
+            <Question key={f.id} f={f} value={answers[f.id] ?? ''} onChange={(v) => set(f.id, v)} invalid={missing.includes(f.id)} eventId={id}
+                      onBusy={(b) => setUploading((u) => (b ? [...u, f.id] : u.filter((x) => x !== f.id)))} />
           ))}
 
           {error && run && <p className="error" role="alert">{error}</p>}
           {!closed && !full && (
-            <button className="btn" type="submit" disabled={busy}>
-              {busy ? 'Saving…' : editing ? 'Save answers' : 'Confirm sign-up'}
+            <button className="btn" type="submit" disabled={busy || uploading.length > 0}>
+              {busy ? 'Saving…' : uploading.length ? 'Uploading…' : editing ? 'Save answers' : 'Confirm sign-up'}
             </button>
           )}
         </form>
@@ -433,9 +452,10 @@ export function SignupPage({ id, profile }) {
   );
 }
 
-function Question({ f, value, onChange, invalid }) {
+function Question({ f, value, onChange, invalid, eventId, onBusy }) {
   const id = `q-${f.id}`;
   const label = <>{f.label}{f.required && <span className="req"> *</span>}</>;
+  if (f.type === 'file') return <FileQuestion id={id} label={label} value={value} onChange={onChange} invalid={invalid} eventId={eventId} onBusy={onBusy} />;
   if (f.type === 'checkboxes') {
     const picked = Array.isArray(value) ? value : [];
     const toggle = (o) => onChange(picked.includes(o) ? picked.filter((x) => x !== o) : (f.options || []).filter((x) => x === o || picked.includes(x)));
@@ -484,6 +504,43 @@ function Question({ f, value, onChange, invalid }) {
   );
 }
 
+function FileQuestion({ id, label, value, onChange, invalid, eventId, onBusy }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [picked, setPicked] = useState(null); // { name, preview }
+  const ref = useRef(null);
+  async function pick(e) {
+    const file = e.target.files?.[0]; e.target.value = '';
+    if (!file) return;
+    setBusy(true); setErr(''); onBusy?.(true);
+    try {
+      const path = await uploadSignupFile(eventId, file);
+      const preview = /^image\/(jpeg|png|webp)$/.test(file.type) ? URL.createObjectURL(file) : null;
+      setPicked({ name: file.name, preview, pdf: file.type === 'application/pdf' });
+      onChange(path);
+    } catch (x) { setErr(messageFor(x.code)); } finally { setBusy(false); onBusy?.(false); }
+  }
+  const has = Boolean(value);
+  return (
+    <div className="field" aria-invalid={invalid}>
+      <span className="label" id={`${id}-l`}>{label}</span>
+      <button type="button" className={`file-pick${has ? ' has' : ''}`} onClick={() => ref.current?.click()} disabled={busy} aria-labelledby={`${id}-l`}>
+        {busy ? <span>Uploading…</span>
+          : has ? (
+            <span className="file-done">
+              {picked?.preview ? <img src={picked.preview} alt="" /> : <span className="file-icon" aria-hidden="true">{picked?.pdf ? 'PDF' : '✓'}</span>}
+              <span className="file-name">{picked?.name || 'File uploaded'}<small>Tap to replace</small></span>
+            </span>
+          ) : <span>Choose a photo or PDF</span>}
+      </button>
+      <input id={id} ref={ref} type="file" accept="image/*,application/pdf" hidden onChange={pick} />
+      <span className="hint">Photo or PDF, up to 10 MB. Only you and the organisers can see it.</span>
+      {err && <span className="error small">{err}</span>}
+      {invalid && !err && <span className="error small">Upload a file.</span>}
+    </div>
+  );
+}
+
 function PendingScreen({ run, onChange, onDone }) {
   const claimed = run.my_payment === 'claimed';
   return (
@@ -494,7 +551,7 @@ function PendingScreen({ run, onChange, onDone }) {
         <p className="lede">
           {claimed
             ? <>We're checking your payment for <strong>{run.name}</strong>. You'll show as signed up once it's confirmed.</>
-            : <>Your spot for <strong>{run.name}</strong> is held. Pay {rupees(run.price)} to confirm it.</>}
+            : <>Your spot for <strong>{run.name}</strong> is held{run.payment_mode === 'online' ? ' for 30 minutes' : ''}. Pay {rupees(run.price)} to confirm it.</>}
         </p>
         <dl className="confirm-facts">
           <div><dt>When</dt><dd>{when(run) || runDate(run.date)}</dd></div>

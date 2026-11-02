@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import {
   adminListRuns, adminMembers, adminSetPayment, adminSaveRun, adminDeleteRun, adminNewQr, adminAddAttendee, adminRemoveAttendee, uploadPoster, normalisePhone,
-  adminEndEvent, adminListBadges, adminSaveBadge, uploadBadgeImage, adminBadgeDetail, adminFindMembers, adminGiveBadge, adminTakeBadge,
+  adminEndEvent, adminListBadges, adminSaveBadge, uploadBadgeImage, adminBadgeDetail, adminFindMembers, adminGiveBadge, adminTakeBadge, signedFileUrls,
   checkinLink, messageFor, runDate, runTime,
 } from './api.js';
 import { go, href } from './router.js';
@@ -427,7 +427,7 @@ function AdminGroup({ title, runs, empty }) {
 
 // ---------- Add / edit ----------
 const EMPTY = { kind: 'run', name: '', date: '', time: '06:00', venue: '', map_url: '', description: '', run_km: '5', poster_url: '',
-  signup_enabled: true, signup_fields: [], capacity: '', price: '', payment_qr_url: '', upi_id: '', classes: '', badge_id: '' };
+  signup_enabled: true, signup_fields: [], capacity: '', price: '', payment_qr_url: '', upi_id: '', classes: '', badge_id: '', payment_mode: 'online' };
 const KIND_LABEL = { run: 'Run', event: 'Event', program: 'Program' };
 const KIND_HINT = {
   run: "Check-ins log km toward runners' totals and badges.",
@@ -464,7 +464,7 @@ export function AdminRunEdit({ id }) {
         setSaved(r);
         setForm({ ...EMPTY, ...Object.fromEntries(Object.keys(EMPTY).map((k) => [k, r[k] ?? ''])),
                   price: r.price ? String(r.price) : '', kind: r.kind || 'run',
-                  classes: r.classes ? String(r.classes) : '', badge_id: r.badge_id || '' });
+                  classes: r.classes ? String(r.classes) : '', badge_id: r.badge_id || '', payment_mode: r.payment_mode || 'manual' });
       })
       .catch((e) => setError(messageFor(e.code)));
   }, [id, isNew]);
@@ -623,6 +623,20 @@ export function AdminRunEdit({ id }) {
                    onChange={(e) => setForm((f) => ({ ...f, price: e.target.value.replace(/\D/g, '').slice(0, 6) }))} />
           </Field>
           {Number(form.price) > 0 && (
+            <fieldset className="field type-pick">
+              <legend className="label">How do people pay?</legend>
+              <div className="seg two-seg" role="radiogroup">
+                <button type="button" role="radio" aria-checked={form.payment_mode === 'online'} className={form.payment_mode === 'online' ? 'on' : ''}
+                        onClick={() => setForm((f) => ({ ...f, payment_mode: 'online' }))}>In the app</button>
+                <button type="button" role="radio" aria-checked={form.payment_mode !== 'online'} className={form.payment_mode !== 'online' ? 'on' : ''}
+                        onClick={() => setForm((f) => ({ ...f, payment_mode: 'manual' }))}>UPI QR</button>
+              </div>
+              <span className="hint">{form.payment_mode === 'online'
+                ? 'Razorpay: UPI, cards, netbanking. Sign-ups confirm automatically once paid. Unpaid sign-ups free their spot after 30 minutes. Razorpay keeps about 2.36%.'
+                : 'People pay your UPI QR and tap "I\'ve paid"; you mark each one paid. No fees.'}</span>
+            </fieldset>
+          )}
+          {Number(form.price) > 0 && form.payment_mode !== 'online' && (
             <>
               <div className="field">
                 <span className="label">Payment QR</span>
@@ -799,6 +813,7 @@ const TYPES = [
   ['choice', 'Single choice'],
   ['checkboxes', 'Checkboxes'],
   ['yes_no', 'Yes / No'],
+  ['file', 'File upload'],
 ];
 
 function SignupBuilder({ form, setForm, hasSignups }) {
@@ -852,6 +867,7 @@ function SignupBuilder({ form, setForm, hasSignups }) {
                   <span>Required</span>
                 </label>
               </div>
+              {q.type === 'file' && <span className="hint">People upload a photo or PDF (up to 10 MB). Only you can open the files, from the sign-up list.</span>}
               {(q.type === 'choice' || q.type === 'checkboxes') && (
                 <label className="field">
                   <span className="hint">Options, one per line · {q.type === 'checkboxes' ? 'runners can tick several' : 'runners pick one'}</span>
@@ -1081,17 +1097,29 @@ function Signups({ run, onChange }) {
   const list = run.signups || [];
   const fields = run.signup_fields || [];
   const paid = run.price > 0;
+  const online = run.payment_mode === 'online';
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   async function setPay(memberId, status) {
     setBusy(memberId); setError('');
     try { onChange(await adminSetPayment(run.id, memberId, status)); } catch (e) { setError(messageFor(e.code)); } finally { setBusy(''); }
   }
+  const fileFields = fields.filter((f) => f.type === 'file');
+  const filePaths = fileFields.length ? list.flatMap((p) => fileFields.map((f) => p.answers?.[f.id])).filter(Boolean) : [];
+  const fileKey = filePaths.join('|');
+  const [urls, setUrls] = useState({});
+  useEffect(() => {
+    if (!fileKey) return;
+    signedFileUrls(fileKey.split('|')).then(setUrls).catch(() => setUrls({}));
+  }, [fileKey]);
   const counts = paid ? list.reduce((c, p) => ({ ...c, [payState(p)]: (c[payState(p)] || 0) + 1 }), {}) : {};
   const confirmedN = list.filter((p) => p.status === 'confirmed').length;
   const pendingN = list.length - confirmedN;
 
-  function downloadCsv() {
+  async function downloadCsv() {
+    let links = {};
+    try { links = filePaths.length ? await signedFileUrls(filePaths, 7 * 24 * 3600) : {}; } catch { /* leave file cells as a note */ }
+    const cell = (f, v) => (f.type === 'file' ? (v ? links[v] || 'uploaded (open in the app)' : '') : answerText(v));
     const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
     const ran = Object.fromEntries((run.attendees || []).map((a) => [a.phone, a.km]));
     const checked = new Set((run.attendees || []).map((a) => a.phone));
@@ -1099,7 +1127,7 @@ function Signups({ run, onChange }) {
     const head = ['Name', 'Number', 'Signed up at', run.kind === 'program' ? 'Classes attended' : run.kind === 'event' ? 'Checked in' : 'Checked in (km)', ...(paid ? ['Payment'] : []), ...fields.map((f) => f.label)];
     const rows = list.map((p) => [p.name, p.phone, new Date(p.at).toLocaleString('en-IN'),
       run.kind === 'program' ? `${classesOf(p.phone)}/${run.classes || ''}` : run.kind === 'event' ? (checked.has(p.phone) ? 'Yes' : '') : (ran[p.phone] ?? ''),
-      ...(paid ? [p.status === 'pending' ? `Pending (${PAY_LABEL[payState(p)]})` : PAY_LABEL[payState(p)]] : []), ...fields.map((f) => answerText(p.answers?.[f.id]))]);
+      ...(paid ? [p.status === 'pending' ? `Pending (${PAY_LABEL[payState(p)]})` : PAY_LABEL[payState(p)]] : []), ...fields.map((f) => cell(f, p.answers?.[f.id]))]);
     const csv = [head, ...rows].map((r) => r.map(esc).join(',')).join('\n');
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv' }));
@@ -1112,7 +1140,10 @@ function Signups({ run, onChange }) {
       <h2 className="section-title" id="su-title">
         Signed up · {confirmedN}{run.capacity != null ? ` of ${run.capacity}` : ''}{pendingN ? ` · ${pendingN} pending` : ''}
       </h2>
-      {paid && list.length > 0 && (
+      {paid && online && list.length > 0 && (
+        <p className="hint">{rupees(run.price)} each, paid in the app · {list.filter((p) => p.payment_ref).length} paid online · {list.filter((p) => p.status === 'pending' && p.holds !== false).length} waiting to pay. Unpaid sign-ups free their spot after 30 minutes; you can still mark someone paid by hand.</p>
+      )}
+      {paid && !online && list.length > 0 && (
         <p className="hint">{rupees(run.price)} each · {counts.confirmed || 0} paid · {counts.claimed || 0} say paid, check and confirm · {counts.none || 0} not paid yet. Pending people hold a spot until you confirm or remove them.</p>
       )}
       {list.length === 0 ? (
@@ -1125,7 +1156,11 @@ function Signups({ run, onChange }) {
                 <div className="su-row"><span>{p.name}</span><span className="muted">{p.phone}</span></div>
                 {paid && (
                   <div className="pay-row">
-                    <span className={`pay-chip pay-${payState(p)}`}>{p.status === 'pending' ? `Pending · ${PAY_LABEL[payState(p)].toLowerCase()}` : PAY_LABEL[payState(p)]}</span>
+                    <span className={`pay-chip pay-${p.status === 'pending' && p.holds === false ? 'cancelled' : payState(p)}`}>
+                      {p.payment_ref ? `Paid online · ${rupees(p.amount || run.price)}`
+                        : p.status === 'pending' ? (online ? (p.holds === false ? 'Didn\'t pay · spot released' : 'Waiting to pay') : `Pending · ${PAY_LABEL[payState(p)].toLowerCase()}`)
+                        : PAY_LABEL[payState(p)]}
+                    </span>
                     {p.status === 'pending' ? (
                       <>
                         <button className="link inline" disabled={busy === p.member_id} onClick={() => setPay(p.member_id, 'confirmed')}>Mark paid</button>
@@ -1136,10 +1171,16 @@ function Signups({ run, onChange }) {
                     )}
                   </div>
                 )}
-                {fields.some((f) => answerText(p.answers?.[f.id])) && (
+                {fields.some((f) => answerText(p.answers?.[f.id], f)) && (
                   <div className="su-answers">
-                    {fields.filter((f) => answerText(p.answers?.[f.id])).map((f) => (
-                      <span key={f.id}><span className="muted">{f.label}:</span> {answerText(p.answers[f.id])}</span>
+                    {fields.filter((f) => answerText(p.answers?.[f.id], f)).map((f) => (
+                      <span key={f.id}><span className="muted">{f.label}:</span>{' '}
+                        {f.type === 'file'
+                          ? (urls[p.answers[f.id]]
+                            ? <a className="link inline file-link" href={urls[p.answers[f.id]]} target="_blank" rel="noreferrer">{/\.pdf$/i.test(p.answers[f.id]) ? 'Open PDF' : 'View photo'}</a>
+                            : <span className="muted">loading…</span>)
+                          : answerText(p.answers[f.id])}
+                      </span>
                     ))}
                   </div>
                 )}

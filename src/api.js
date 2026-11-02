@@ -74,6 +74,22 @@ const MESSAGES = {
   badge_image_required: 'Add an image for the badge.',
   member_not_found: "Couldn't find that member. Search again.",
   bad_badge_date: "The date can't be in the future.",
+  bad_file: 'Upload the file again, then submit.',
+  file_too_big: 'That file is over 10 MB. Try a smaller one or a screenshot.',
+  bad_file_type: 'Upload a photo (JPG, PNG, HEIC) or a PDF.',
+  // online payment
+  payments_not_ready: "Online payment isn't switched on yet. Please message the organiser.",
+  payment_cancelled: 'Payment not completed. Your spot is held for 30 minutes; tap Pay to try again.',
+  order_failed: "Couldn't start the payment. Try again in a minute.",
+  bad_signature: "We couldn't confirm that payment. If money left your account, it will show here within a few minutes; otherwise message the organiser.",
+  payment_not_complete: 'The payment is still processing. Refresh in a minute.',
+  already_paid: "You've already paid for this one.",
+  not_online: 'This event takes payment by UPI QR. Use the QR below.',
+  not_signed_up: 'Sign up first, then pay.',
+  not_paid_event: 'This one is free.',
+  amount_mismatch: "That payment amount doesn't match. Please message the organiser.",
+  checkout_failed: "Razorpay didn't load. Check your connection and try again.",
+  bad_price: 'Online payments need a price of at least ₹1.',
 };
 export const messageFor = (code) => MESSAGES[code] ?? MESSAGES.server_error;
 
@@ -125,6 +141,65 @@ export async function verifyCode({ phone, purpose, code, password, name }) {
   return logIn({ phone, password });
 }
 
+// ---- Online payment (Razorpay) ----
+async function payments(payload) {
+  const { data: sess } = await supabase.auth.getSession();
+  const token = sess?.session?.access_token;
+  if (!token) throw new ApiError('not_logged_in');
+  let res;
+  try {
+    res = await fetch(`${SUPABASE_URL}/functions/v1/payments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', apikey: SUPABASE_KEY, Authorization: `Bearer ${token}` },
+      body: JSON.stringify(payload),
+    });
+  } catch {
+    throw new ApiError('network');
+  }
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok || body.ok === false) throw new ApiError(body.error ?? 'server_error');
+  return body;
+}
+
+let checkoutScript;
+function loadCheckout() {
+  if (window.Razorpay) return Promise.resolve();
+  checkoutScript ||= new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://checkout.razorpay.com/v1/checkout.js';
+    s.onload = resolve;
+    s.onerror = () => { checkoutScript = null; reject(new ApiError('checkout_failed')); };
+    document.head.appendChild(s);
+  });
+  return checkoutScript;
+}
+
+// Opens Razorpay for a pending sign-up. Resolves with the updated event once the payment is verified.
+export async function payOnline(eventId) {
+  await loadCheckout();
+  const o = await payments({ action: 'order', event_id: eventId });
+  const paid = await new Promise((resolve, reject) => {
+    const rz = new window.Razorpay({
+      key: o.key_id, amount: o.amount, currency: o.currency, order_id: o.order_id,
+      name: o.name, description: o.description, prefill: o.prefill,
+      theme: { color: '#0a0a0a' },
+      handler: resolve,
+      modal: { ondismiss: () => reject(new ApiError('payment_cancelled')) },
+    });
+    rz.open();
+  });
+  try {
+    await payments({ action: 'verify', order_id: paid.razorpay_order_id, payment_id: paid.razorpay_payment_id, signature: paid.razorpay_signature });
+  } catch (e) {
+    // Razorpay also tells the server directly; give that a moment before reporting a problem.
+    await new Promise((r) => setTimeout(r, 2500));
+    const after = await runDetail(eventId);
+    if (after?.signed_up) return after;
+    throw e;
+  }
+  return runDetail(eventId);
+}
+
 export async function createAccount({ phone, password, name }) {
   await memberAuth({ action: 'signup', phone, password, name });
   return logIn({ phone, password });
@@ -168,6 +243,7 @@ export const getProfile = () => rpc('my_profile');
 // ---- Runs ----
 export const upcomingRuns = () => rpc('upcoming_runs');
 export const pastEvents = () => rpc('past_events');
+export const leaderboard = () => rpc('public_leaderboard');
 export const runDetail = (id) => rpc('run_detail', { p_id: id });
 export const attendRun = (id, code) => rpc('attend_run', { p_id: id, p_code: code });
 export const signUp = (id, answers) => rpc('sign_up_for_run', { p_id: id, p_answers: answers });
@@ -261,6 +337,33 @@ export async function uploadAvatar(file) {
   const url = supabase.storage.from('avatars').getPublicUrl(path).data.publicUrl;
   await rpc('set_my_avatar', { p_url: url });
   return url;
+}
+
+// ---- Files attached to a sign-up (private: only the member and organisers can open them) ----
+const FILE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif', 'application/pdf'];
+export async function uploadSignupFile(eventId, file) {
+  const { data } = await supabase.auth.getUser();
+  const uid = data?.user?.id;
+  if (!uid) throw new ApiError('not_logged_in');
+  let type = file.type || '';
+  if (!type && /\.(heic|heif)$/i.test(file.name)) type = 'image/heic';
+  if (!FILE_TYPES.includes(type)) throw new ApiError('bad_file_type');
+  let blob = file;
+  // Big phone photos get resized; PDFs and HEIC go up as they are.
+  if (['image/jpeg', 'image/png', 'image/webp'].includes(type) && file.size > 1.5e6) { blob = await shrink(file, 2200); type = blob.type || type; }
+  if (blob.size > 10 * 1024 * 1024) throw new ApiError('file_too_big');
+  const ext = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/heic': 'heic', 'image/heif': 'heif', 'application/pdf': 'pdf' }[type];
+  const path = `${uid}/${eventId}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  const { error } = await supabase.storage.from('signup-files').upload(path, blob, { contentType: type, upsert: false });
+  if (error) throw new ApiError(/size|exceed/i.test(error.message || '') ? 'file_too_big' : 'upload_failed');
+  return path;
+}
+export async function signedFileUrls(paths, seconds = 3600) {
+  const list = [...new Set(paths.filter(Boolean))];
+  if (!list.length) return {};
+  const { data, error } = await supabase.storage.from('signup-files').createSignedUrls(list, seconds);
+  if (error) throw new ApiError('server_error');
+  return Object.fromEntries((data || []).filter((d) => d.signedUrl).map((d) => [d.path, d.signedUrl]));
 }
 
 // ---- Share a run ----

@@ -6,6 +6,7 @@ import Badge from './Badge.jsx';
 import { RunPage, ScanPage, CheckInPage, SignupPage, BadgeImg } from './Runs.jsx';
 import Landing from './Landing.jsx';
 import Avatar from './Avatar.jsx';
+import Leaderboard from './Leaderboard.jsx';
 const AdminRuns = lazy(() => import('./Admin.jsx').then((m) => ({ default: m.AdminRuns })));
 const AdminMembers = lazy(() => import('./Admin.jsx').then((m) => ({ default: m.AdminMembers })));
 const AdminBadges = lazy(() => import('./Admin.jsx').then((m) => ({ default: m.AdminBadges })));
@@ -58,6 +59,7 @@ export default function Home() {
     if (a === 'run' && b && c === 'signup') return <SignupPage id={b} profile={profile} />;
     if (a === 'run' && b && c === 'checkin') return <CheckInPage id={b} code={query.get('c') || ''} onLogged={load} />;
     if (a === 'run' && b) return <RunPage id={b} profile={profile} />;
+    if (a === 'leaderboard') return <Leaderboard profile={profile} />;
     if (a === 'admin') {
       if (!profile.is_admin) return <NotAllowed />;
       if (b === 'run' && c) return <Wait><AdminRunEdit id={c} /></Wait>;
@@ -150,7 +152,7 @@ function Dashboard({ p }) {
         </p>
         <dl className="stats">
           <div><dt>Runs</dt><dd>{p.total_runs ?? 0}</dd></div>
-          <div><dt>Rank</dt><dd>{p.rank ? <>#{p.rank}<small> of {p.runners}</small></> : '—'}</dd></div>
+          <div><dt>Rank</dt><dd>{p.rank ? <a className="rank-link" href={href('leaderboard')}>#{p.rank}<small> of {p.runners}</small></a> : '—'}</dd></div>
           <div><dt>Last run</dt><dd>{shortDate(p.last_run)}</dd></div>
         </dl>
       </section>

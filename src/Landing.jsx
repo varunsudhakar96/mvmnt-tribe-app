@@ -1,6 +1,7 @@
 import Wordmark from './Wordmark.jsx';
 import Avatar from './Avatar.jsx';
 import { UpcomingRuns, PastEvents } from './Runs.jsx';
+import { TopRunners } from './Leaderboard.jsx';
 import { href } from './router.js';
 
 // The main page for everyone: the quote, the runs, and Log in (or your photo once logged in).
@@ -24,6 +25,7 @@ export default function Landing({ profile }) {
       </section>
 
       <UpcomingRuns />
+      <TopRunners />
       <PastEvents />
     </main>
   );
