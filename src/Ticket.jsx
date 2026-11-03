@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import QRCode from 'qrcode';
-import { runDetail, ticketLink, messageFor, runDate, runTime } from './api.js';
+import { runDetail, ticketLink, messageFor, runDate, runTime, priceFor } from './api.js';
 import { href } from './router.js';
 
 const rupees = (n) => `₹${Number(n || 0).toLocaleString('en-IN')}`;
@@ -13,8 +13,10 @@ export function Ticket({ run, name, onDone, backHref }) {
   const [canShare, setCanShare] = useState(false);
   const [saved, setSaved] = useState('');
   const code = run.my_ticket;
-  const venueDue = run.my_payment === 'venue' && run.price > 0;
+  const due = priceFor(run);
+  const venueDue = run.my_payment === 'venue' && due > 0;
   const paid = run.price > 0 && run.my_payment === 'confirmed';
+  const discNote = run.my_discount ? ` · ${run.my_discount.pct}% ${run.my_discount.name} badge discount` : '';
   const scanMode = run.checkin_mode === 'ticket' || run.checkin_mode === 'both';
 
   useEffect(() => {
@@ -48,7 +50,7 @@ export function Ticket({ run, name, onDone, backHref }) {
       g.font = '800 54px "Barlow Condensed", "Arial Narrow", sans-serif';
       g.fillText(code, W / 2, 1300);
       g.font = '500 32px Barlow, Arial, sans-serif'; g.fillStyle = '#6b6b6b';
-      g.fillText(run.my_test ? 'TEST TICKET · not a real booking' : venueDue ? `Pay ${rupees(run.price)} at the venue` : paid ? `Paid ${rupees(run.price)}` : 'Show this at the door', W / 2, 1360);
+      g.fillText(run.my_test ? 'TEST TICKET · not a real booking' : venueDue ? `Pay ${rupees(due)} at the venue${discNote}` : paid ? `Paid ${rupees(due)}${discNote}` : 'Show this at the door', W / 2, 1360);
       g.fillText('mvmnttribe', W / 2, 1440);
       const blob = await new Promise((r) => c.toBlob(r, 'image/png'));
       if (!dead && blob) {
@@ -96,8 +98,9 @@ export function Ticket({ run, name, onDone, backHref }) {
           {qr ? <img className="ticket-qr" src={qr} alt={`Ticket QR, code ${code}`} /> : <div className="ticket-qr blank" />}
           <p className="ticket-code" aria-label="Ticket code">{code}</p>
           {run.my_test && <p className="preview-banner ticket-note">Test ticket · not a real booking</p>}
-          {venueDue && <p className="pending-banner ticket-note">Pay {rupees(run.price)} at the venue</p>}
-          {paid && <p className="signed-banner ticket-note"><span aria-hidden="true">✓</span> Paid {rupees(run.price)}</p>}
+          {venueDue && <p className="pending-banner ticket-note">Pay {rupees(due)} at the venue</p>}
+          {paid && <p className="signed-banner ticket-note"><span aria-hidden="true">✓</span> Paid {rupees(due)}</p>}
+          {run.my_discount && (paid || venueDue) && <p className="muted small center">{run.my_discount.pct}% off with your {run.my_discount.name} badge</p>}
           <p className="hint center">
             {scanMode
               ? 'Show this at the door. The organiser scans it to check you in.'

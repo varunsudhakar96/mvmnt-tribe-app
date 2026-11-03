@@ -1,5 +1,5 @@
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
-import { upcomingRuns, pastEvents, runDetail, checkInRun, shareRun, signUp, cancelSignup, claimPayment, payOnline, testPay, uploadSignupFile, prefill, readScan, messageFor, runDate, runTime, formatPhone } from './api.js';
+import { upcomingRuns, pastEvents, runDetail, checkInRun, shareRun, signUp, cancelSignup, claimPayment, payOnline, testPay, uploadSignupFile, priceFor, discounted, prefill, readScan, messageFor, runDate, runTime, formatPhone } from './api.js';
 import { go, href } from './router.js';
 import Badge from './Badge.jsx';
 import { Ticket } from './Ticket.jsx';
@@ -23,7 +23,7 @@ const venueDue = (r) => r?.my_payment === 'venue';
 const ticketScan = (r) => r?.checkin_mode === 'ticket' || r?.checkin_mode === 'both';
 const venueScan = (r) => r?.checkin_mode !== 'ticket';
 const rupees = (n) => `₹${Number(n || 0).toLocaleString('en-IN')}`;
-const upiLink = (r) => `upi://pay?pa=${encodeURIComponent(r.upi_id)}&pn=${encodeURIComponent('Mvmnt Tribe')}&am=${Number(r.price || 0)}&cu=INR&tn=${encodeURIComponent(r.name.slice(0, 40))}`;
+const upiLink = (r) => `upi://pay?pa=${encodeURIComponent(r.upi_id)}&pn=${encodeURIComponent('Mvmnt Tribe')}&am=${priceFor(r)}&cu=INR&tn=${encodeURIComponent(r.name.slice(0, 40))}`;
 const kmText = (n) => { const v = Number(n || 0); return Number.isInteger(v) ? String(v) : String(+v.toFixed(2)); };
 const when = (r) => [runDate(r.date), runTime(r.time)].filter(Boolean).join(' · ');
 
@@ -205,7 +205,7 @@ export function RunPage({ id, profile }) {
             ) : run.signed_up && !run.is_past ? (
               <p className="signed-banner"><span aria-hidden="true">✓</span> You're signed up</p>
             ) : pending(run) && !run.is_past && (
-              <p className="pending-banner">{venueDue(run) ? `Signed up · pay ${rupees(run.price)} at the venue` : run.my_payment === 'claimed' ? 'Waiting for payment confirmation' : 'Payment pending'}</p>
+              <p className="pending-banner">{venueDue(run) ? `Signed up · pay ${rupees(priceFor(run))} at the venue` : run.my_payment === 'claimed' ? 'Waiting for payment confirmation' : 'Payment pending'}</p>
             )}
             <p className="eyebrow">
               {run.is_today && !isProgram(run) && <span className="today">Today</span>}
@@ -287,7 +287,7 @@ function PayCard({ run, onChange }) {
   const [err, setErr] = useState('');
   const status = run.my_payment || 'none';
   if (online(run)) {
-    if (status === 'confirmed') return <p className="pay-done"><span aria-hidden="true">✓</span> Paid {rupees(run.price)}. Thank you.</p>;
+    if (status === 'confirmed') return <p className="pay-done"><span aria-hidden="true">✓</span> Paid {rupees(priceFor(run))}{run.my_discount ? ` (${run.my_discount.pct}% ${run.my_discount.name} discount)` : ''}. Thank you.</p>;
     if (status !== 'venue') return null; // a checkout in progress is nothing yet
     const pay = async () => {
       setBusy(true); setErr('');
@@ -298,8 +298,8 @@ function PayCard({ run, onChange }) {
     return (
       <section className="pay-card" aria-labelledby="pay-title">
         <h2 className="section-title" id="pay-title">Pay at the venue</h2>
-        <p className="muted">You've chosen to pay {rupees(run.price)} at the venue. You can also pay now in the app if that's easier.</p>
-        <button className="btn ghost" onClick={pay} disabled={busy}>{busy ? 'Opening payment…' : `Pay ${rupees(run.price)} now${preview(run) ? ' (test)' : ''}`}</button>
+        <p className="muted">You've chosen to pay {rupees(priceFor(run))}{run.my_discount ? ` (${run.my_discount.pct}% off with your ${run.my_discount.name} badge)` : ''} at the venue. You can also pay now in the app if that's easier.</p>
+        <button className="btn ghost" onClick={pay} disabled={busy}>{busy ? 'Opening payment…' : `Pay ${rupees(priceFor(run))} now${preview(run) ? ' (test)' : ''}`}</button>
         {err && <p className={err === messageFor('payment_cancelled') ? 'note' : 'error'} role="alert">{err}</p>}
       </section>
     );
@@ -309,11 +309,12 @@ function PayCard({ run, onChange }) {
     try { onChange(await claimPayment(run.id)); } catch (e) { setErr(messageFor(e.code)); } finally { setBusy(false); }
   }
   if (status === 'confirmed') {
-    return <p className="pay-done"><span aria-hidden="true">✓</span> Paid {rupees(run.price)}. Thank you.</p>;
+    return <p className="pay-done"><span aria-hidden="true">✓</span> Paid {rupees(priceFor(run))}. Thank you.</p>;
   }
   return (
     <section className="pay-card" aria-labelledby="pay-title">
-      <h2 className="section-title" id="pay-title">Pay {rupees(run.price)}</h2>
+      <h2 className="section-title" id="pay-title">Pay {rupees(priceFor(run))}</h2>
+      {run.my_discount && <p className="muted small">{rupees(run.price)} less {run.my_discount.pct}% with your {run.my_discount.name} badge.</p>}
       {status === 'claimed' ? (
         <p className="muted">Thanks. We're checking your payment. Your spot is confirmed as soon as the organiser marks it paid.</p>
       ) : (
@@ -392,10 +393,11 @@ export function SignupPage({ id, profile }) {
   const [done, setDone] = useState(null);
   const [missing, setMissing] = useState([]);
   const [uploading, setUploading] = useState([]);
+  const [disc, setDisc] = useState(''); // chosen badge discount key, '' = none
 
   useEffect(() => {
     runDetail(id)
-      .then((r) => { setRun(r); setAnswers(r?.my_answers || {}); })
+      .then((r) => { setRun(r); setAnswers(r?.my_answers || {}); setDisc(r?.my_discount?.key || ''); })
       .catch((e) => setError(messageFor(e.code)));
   }, [id]);
 
@@ -403,6 +405,11 @@ export function SignupPage({ id, profile }) {
   const set = (fid, v) => { setAnswers((a) => ({ ...a, [fid]: v })); setMissing((m) => m.filter((x) => x !== fid)); setError(''); };
 
   const payFirst = run && run.price > 0 && online(run) && !holding(run);
+  // Badge discounts: offered on paid events to members who hold one, until the booking is locked by a payment.
+  const offers = (run?.my_discounts || []);
+  const canDiscount = run && run.price > 0 && offers.length > 0 && (!holding(run) || (pending(run) && run.my_payment === 'none' && !online(run)));
+  const chosen = canDiscount ? offers.find((o) => o.key === disc) : null;
+  const due = run ? (canDiscount ? discounted(run.price, chosen?.pct) : priceFor(run)) : 0;
 
   async function submit(e, how = 'default') {
     e?.preventDefault?.();
@@ -415,14 +422,15 @@ export function SignupPage({ id, profile }) {
         .map((f) => [f.id, f.type === 'checkboxes' ? (answers[f.id] || []) : String(answers[f.id] ?? '').trim()])
         .filter(([, v]) => !isBlank(v)));
       if (payFirst && how === 'pay') {
-        await signUp(id, clean, false);          // reserve the spot while they pay (invisible unless paid)
+        const held = await signUp(id, clean, false, canDiscount ? disc : null); // reserve the spot while they pay (invisible unless paid)
+        if (held.signed_up) { setDone(held); return; }                            // a 100% badge discount: nothing to pay
         try { setDone(await (preview(run) ? testPay(id) : payOnline(id))); }
         catch (err) {
           if (err.code === 'payment_cancelled') await cancelSignup(id).catch(() => {});
           throw err;
         }
       } else {
-        setDone(await signUp(id, clean, payFirst && how === 'venue'));
+        setDone(await signUp(id, clean, payFirst && how === 'venue', canDiscount ? disc : null));
       }
     } catch (err) {
       setError(messageFor(err.code));
@@ -465,6 +473,24 @@ export function SignupPage({ id, profile }) {
                       onBusy={(b) => setUploading((u) => (b ? [...u, f.id] : u.filter((x) => x !== f.id)))} />
           ))}
 
+          {!closed && !full && canDiscount && (
+            <fieldset className="field discount-pick">
+              <legend className="label">Badge discount</legend>
+              <span className="hint">You've earned {offers.length === 1 ? 'a discount' : 'discounts'}. Use one per booking, or none.</span>
+              <div className="disc-list" role="radiogroup" aria-label="Badge discount">
+                <button type="button" role="radio" aria-checked={!chosen} className={`disc-opt${!chosen ? ' on' : ''}`} onClick={() => setDisc('')}>
+                  <span className="disc-copy"><strong>No discount</strong><small>Pay the full {rupees(run.price)}</small></span>
+                </button>
+                {offers.map((o) => (
+                  <button key={o.key} type="button" role="radio" aria-checked={chosen?.key === o.key} className={`disc-opt${chosen?.key === o.key ? ' on' : ''}`} onClick={() => setDisc(o.key)}>
+                    {o.kind === 'run' ? <Badge tier={o.key} size={36} /> : <BadgeImg badge={o} size={36} />}
+                    <span className="disc-copy"><strong>{o.name}{o.kind === 'run' ? ' badge' : ''} · {o.pct}% off</strong><small>Pay {rupees(discounted(run.price, o.pct))} instead of {rupees(run.price)}</small></span>
+                  </button>
+                ))}
+              </div>
+            </fieldset>
+          )}
+
           {error && run && <p className={error === messageFor('payment_cancelled') ? 'note' : 'error'} role="alert">{error}</p>}
           {!closed && !full && !payFirst && (
             <button className="btn" type="submit" disabled={!!busy || uploading.length > 0}>
@@ -474,7 +500,7 @@ export function SignupPage({ id, profile }) {
           {!closed && !full && payFirst && (
             <div className="stack tight">
               <button className="btn" type="button" onClick={(e) => submit(e, 'pay')} disabled={!!busy || uploading.length > 0}>
-                {busy === 'pay' ? 'Opening payment…' : uploading.length ? 'Uploading…' : `Pay ${rupees(run.price)} & sign up${preview(run) ? ' (test)' : ''}`}
+                {busy === 'pay' ? 'Opening payment…' : uploading.length ? 'Uploading…' : (due === 0 ? 'Sign up free with badge' : `Pay ${rupees(due)} & sign up${preview(run) ? ' (test)' : ''}`)}
               </button>
               {run.pay_at_venue && (
                 <button className="btn ghost" type="button" onClick={(e) => submit(e, 'venue')} disabled={!!busy || uploading.length > 0}>
@@ -591,7 +617,7 @@ function PendingScreen({ run, onChange, onDone }) {
         <p className="lede">
           {claimed
             ? <>We're checking your payment for <strong>{run.name}</strong>. You'll show as signed up once it's confirmed.</>
-            : <>Your spot for <strong>{run.name}</strong> is held{run.payment_mode === 'online' ? ' for 30 minutes' : ''}. Pay {rupees(run.price)} to confirm it.</>}
+            : <>Your spot for <strong>{run.name}</strong> is held{run.payment_mode === 'online' ? ' for 30 minutes' : ''}. Pay {rupees(priceFor(run))} to confirm it.</>}
         </p>
         <dl className="confirm-facts">
           <div><dt>When</dt><dd>{when(run) || runDate(run.date)}</dd></div>

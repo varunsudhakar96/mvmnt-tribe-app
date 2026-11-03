@@ -82,6 +82,9 @@ const MESSAGES = {
   payment_cancelled: 'Payment not completed, so nothing was booked. Tap Pay to try again.',
   preview_event: "This event isn't live yet, so real payments are off. Use the test payment instead.",
   not_preview: 'This event is live now. Pay in the app as usual.',
+  bad_discount: "That badge discount isn't available on your account.",
+  discounts_off: 'Badge discounts don\'t apply to this event.',
+  bad_discount_pct: 'The discount must be between 0 and 100%.',
   order_failed: "Couldn't start the payment. Try again in a minute.",
   bad_signature: "We couldn't confirm that payment. If money left your account, it will show here within a few minutes; otherwise message the organiser.",
   payment_not_complete: 'The payment is still processing. Refresh in a minute.',
@@ -253,7 +256,7 @@ export const pastEvents = () => rpc('past_events');
 export const leaderboard = () => rpc('public_leaderboard');
 export const runDetail = (id) => rpc('run_detail', { p_id: id });
 export const attendRun = (id, code) => rpc('attend_run', { p_id: id, p_code: code });
-export const signUp = (id, answers, venue = false) => rpc('sign_up_for_run', { p_id: id, p_answers: answers, p_venue: venue });
+export const signUp = (id, answers, venue = false, discount = null) => rpc('sign_up_for_run', { p_id: id, p_answers: answers, p_venue: venue, p_discount: discount || null });
 export const cancelSignup = (id) => rpc('cancel_signup', { p_id: id });
 export const claimPayment = (id) => rpc('claim_payment', { p_id: id });
 export const checkInRun = (id, code, km) => rpc('check_in_run', { p_id: id, p_code: code, p_km: km });
@@ -300,6 +303,11 @@ export const adminRemoveAttendee = (id, memberId, date) => rpc('admin_remove_att
 export const adminScanTicket = (code, eventId, km) => rpc('admin_scan_ticket', { p_code: code, p_event: eventId || null, p_km: km ?? null });
 export const adminEndEvent = (id, end = true) => rpc('admin_end_event', { p_id: id, p_end: end });
 export const adminClearTests = (id) => rpc('admin_clear_tests', { p_id: id });
+export const adminTierDiscounts = () => rpc('admin_tier_discounts');
+export const adminSetTierDiscount = (tier, pct) => rpc('admin_set_tier_discount', { p_tier: tier, p_pct: pct });
+// What this member pays for the event (badge discount applied), in rupees.
+export const priceFor = (run) => Number(run?.my_price ?? run?.price ?? 0);
+export const discounted = (price, pct) => Math.max(0, Math.round(Number(price || 0) * (100 - Number(pct || 0)) / 100));
 // On a draft (not yet live) event, "paying" confirms the test booking without touching Razorpay.
 export const testPay = (id) => rpc('test_pay', { p_id: id });
 export const adminListBadges = () => rpc('admin_list_badges');

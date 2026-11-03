@@ -3,11 +3,12 @@ const Scanner = lazy(() => import('./Scanner.jsx'));
 import QRCode from 'qrcode';
 import {
   adminListRuns, adminMembers, adminSetPayment, adminSaveRun, adminDeleteRun, adminNewQr, adminAddAttendee, adminRemoveAttendee, uploadPoster, normalisePhone,
-  adminEndEvent, adminClearTests, adminListBadges, adminSaveBadge, uploadBadgeImage, adminBadgeDetail, adminFindMembers, adminGiveBadge, adminTakeBadge, signedFileUrls, adminScanTicket, readScan,
+  adminEndEvent, adminClearTests, adminTierDiscounts, adminSetTierDiscount, adminListBadges, adminSaveBadge, uploadBadgeImage, adminBadgeDetail, adminFindMembers, adminGiveBadge, adminTakeBadge, signedFileUrls, adminScanTicket, readScan,
   checkinLink, messageFor, runDate, runTime,
 } from './api.js';
 import { go, href } from './router.js';
 import { answerText, ShareButton, BadgeImg } from './Runs.jsx';
+import Badge from './Badge.jsx';
 
 const LAST_KM = 'mvmnt.lastRunKm';
 const remember = (k, v) => { try { localStorage.setItem(k, v); } catch { /* private mode */ } };
@@ -187,6 +188,8 @@ export function AdminBadges() {
           : <NewBadgeForm onCancel={() => setAdding(false)} onSaved={(b) => go(`admin/badge/${b.id}`)} />}
         {error && <p className="error" role="alert">{error}</p>}
         {!error && badges === undefined && <p className="muted">Loading…</p>}
+        <TierDiscounts />
+        <h2 className="section-title">Program badges</h2>
         {badges && badges.length === 0 && <p className="muted">No badges yet. Add one, or create it while setting up a program.</p>}
         {badges && badges.length > 0 && (
           <ul className="admin-list">
@@ -197,7 +200,7 @@ export function AdminBadges() {
                     <BadgeImg badge={b} size={48} />
                     <span className="badge-row-copy">
                       <span className="run-name">{b.name}</span>
-                      <span className="muted">{b.awarded} {b.awarded === 1 ? 'person has it' : 'people have it'}{b.programs ? ` · used in ${b.programs} ${b.programs === 1 ? 'program' : 'programs'}` : ''}</span>
+                      <span className="muted">{b.awarded} {b.awarded === 1 ? 'person has it' : 'people have it'}{b.programs ? ` · used in ${b.programs} ${b.programs === 1 ? 'program' : 'programs'}` : ''}{b.discount_pct > 0 ? ` · ${b.discount_pct}% off` : ''}</span>
                     </span>
                   </span>
                   <span className="chev" aria-hidden="true">›</span>
@@ -274,6 +277,8 @@ export function AdminBadgeDetail({ id }) {
         {badge.programs.length > 0 && (
           <p className="hint">Given automatically for finishing: {badge.programs.map((p) => `${p.name}${p.classes ? ` (${p.classes} classes)` : ''}`).join(', ')}.</p>
         )}
+
+        <BadgeDiscount badge={badge} onChange={setBadge} />
 
         <section className="builder" aria-labelledby="give-h">
           <h2 className="section-title" id="give-h">Give this badge</h2>
@@ -429,7 +434,7 @@ function AdminGroup({ title, runs, empty }) {
 
 // ---------- Add / edit ----------
 const EMPTY = { kind: 'run', name: '', date: '', time: '06:00', venue: '', map_url: '', description: '', run_km: '5', poster_url: '',
-  signup_enabled: true, signup_fields: [], capacity: '', price: '', payment_qr_url: '', upi_id: '', classes: '', badge_id: '', payment_mode: 'online', pay_at_venue: false, checkin_mode: 'venue_qr', published: true };
+  signup_enabled: true, signup_fields: [], capacity: '', price: '', payment_qr_url: '', upi_id: '', classes: '', badge_id: '', payment_mode: 'online', pay_at_venue: false, checkin_mode: 'venue_qr', published: true, discounts_allowed: true };
 const CHECKIN = [['venue_qr', 'They scan the venue QR'], ['ticket', 'You scan their ticket'], ['both', 'Either']];
 const KIND_LABEL = { run: 'Run', event: 'Event', program: 'Program' };
 const KIND_HINT = {
@@ -469,7 +474,7 @@ export function AdminRunEdit({ id }) {
         setSaved(r);
         setForm({ ...EMPTY, ...Object.fromEntries(Object.keys(EMPTY).map((k) => [k, r[k] ?? ''])),
                   price: r.price ? String(r.price) : '', kind: r.kind || 'run',
-                  classes: r.classes ? String(r.classes) : '', badge_id: r.badge_id || '', payment_mode: r.payment_mode || 'manual', pay_at_venue: !!r.pay_at_venue, checkin_mode: r.checkin_mode || 'venue_qr', published: r.published !== false });
+                  classes: r.classes ? String(r.classes) : '', badge_id: r.badge_id || '', payment_mode: r.payment_mode || 'manual', pay_at_venue: !!r.pay_at_venue, checkin_mode: r.checkin_mode || 'venue_qr', published: r.published !== false, discounts_allowed: r.discounts_allowed !== false });
       })
       .catch((e) => setError(messageFor(e.code)));
   }, [id, isNew]);
@@ -670,6 +675,15 @@ export function AdminRunEdit({ id }) {
               <span>
                 <strong>Allow pay at the venue</strong>
                 <small>Adds a second button: "Sign up, pay at the venue". Those people hold a spot and show as "Pay at venue" until you mark them paid.</small>
+              </span>
+            </label>
+          )}
+          {Number(form.price) > 0 && (
+            <label className="toggle-row disc-toggle">
+              <input type="checkbox" checked={!!form.discounts_allowed} onChange={(e) => setForm((f) => ({ ...f, discounts_allowed: e.target.checked }))} />
+              <span>
+                <strong>Badge discounts apply</strong>
+                <small>Members with a badge that carries a discount can use it here (one per booking). Set the percentages under Badges. Switch off for events run at cost.</small>
               </span>
             </label>
           )}
@@ -1234,11 +1248,12 @@ function Signups({ run, onChange }) {
                 {paid && (
                   <div className="pay-row">
                     <span className={`pay-chip pay-${p.status === 'pending' && p.holds === false ? 'cancelled' : payState(p)}`}>
-                      {p.payment_ref ? `Paid online · ${rupees(p.amount || run.price)}`
-                        : p.payment === 'venue' ? `Pay at venue · ${rupees(run.price)} due`
+                      {p.payment_ref ? `Paid online · ${rupees(p.amount ?? p.due ?? run.price)}`
+                        : p.payment === 'venue' ? `Pay at venue · ${rupees(p.due ?? run.price)} due`
                         : p.status === 'pending' ? `Pending · ${PAY_LABEL[payState(p)].toLowerCase()}`
                         : PAY_LABEL[payState(p)]}
                     </span>
+                    {p.discount_pct > 0 && <span className="pay-chip pay-disc">−{p.discount_pct}% {p.discount}</span>}
                     {p.status === 'pending' ? (
                       <>
                         <button className="link inline" disabled={busy === p.member_id} onClick={() => setPay(p.member_id, 'confirmed')}>Mark paid</button>
@@ -1401,7 +1416,7 @@ export function AdminScan({ eventId, code }) {
           {ok && result.kind === 'run' && result.km != null && <p className="muted">Logged {Number(result.km)} km</p>}
           {ok && result.due > 0 && (
             <div className="scan-due">
-              <p className="pending-banner">Collect {rupees(result.due)}{result.payment === 'venue' ? ' · pay at venue' : ''}</p>
+              <p className="pending-banner">Collect {rupees(result.due)}{result.payment === 'venue' ? ' · pay at venue' : ''}{result.discount_pct > 0 ? ` · ${result.discount_pct}% ${result.discount} discount applied` : ''}</p>
               <button className="btn" onClick={markPaid} disabled={busyPay}>{busyPay ? 'Saving…' : 'Mark paid'}</button>
             </div>
           )}
@@ -1420,5 +1435,92 @@ export function AdminScan({ eventId, code }) {
         </div>
       )}
     </main>
+  );
+}
+
+
+// ---------- Badge discounts ----------
+const TIER_NAMES = { PACER: 'Pacer', STRIDER: 'Strider', RANGER: 'Ranger', WAYFARER: 'Wayfarer', VOYAGER: 'Voyager' };
+
+function TierDiscounts() {
+  const [tiers, setTiers] = useState(undefined);
+  const [edits, setEdits] = useState({});
+  const [busy, setBusy] = useState('');
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  useEffect(() => { adminTierDiscounts().then(setTiers).catch((e) => { setTiers([]); setError(messageFor(e.code)); }); }, []);
+
+  async function save(t) {
+    const pct = Number(edits[t.tier] ?? t.pct);
+    setBusy(t.tier); setError(''); setNotice('');
+    try {
+      setTiers(await adminSetTierDiscount(t.tier, pct));
+      setEdits((e) => { const n = { ...e }; delete n[t.tier]; return n; });
+      setNotice(pct > 0 ? `${TIER_NAMES[t.tier]} badge now gives ${pct}% off.` : `${TIER_NAMES[t.tier]} badge gives no discount.`);
+    } catch (e) { setError(messageFor(e.code)); } finally { setBusy(''); }
+  }
+
+  return (
+    <section className="builder" aria-labelledby="tier-disc-h">
+      <h2 className="section-title" id="tier-disc-h">Run badge discounts</h2>
+      <p className="muted">Percent off paid events for runners who've earned each badge. A runner can use their own tier or any tier below it, one per booking. Leave at 0 for no discount.</p>
+      {tiers === undefined && <p className="muted">Loading…</p>}
+      {tiers && (
+        <ul className="tier-disc-list">
+          {tiers.map((t) => {
+            const val = edits[t.tier] ?? String(t.pct);
+            const dirty = edits[t.tier] !== undefined && Number(edits[t.tier]) !== t.pct;
+            return (
+              <li key={t.tier}>
+                <Badge tier={t.tier} size={44} />
+                <span className="tier-disc-copy">
+                  <strong>{t.name}</strong>
+                  <span className="muted small">{t.km} km · {t.holders} {t.holders === 1 ? 'runner' : 'runners'} on this tier</span>
+                </span>
+                <span className="pct-field">
+                  <input className="input pct-input" inputMode="numeric" value={val} aria-label={`${t.name} discount percent`}
+                         onChange={(e) => setEdits((x) => ({ ...x, [t.tier]: e.target.value.replace(/\D/g, '').slice(0, 3) }))} />
+                  <span>%</span>
+                </span>
+                <button type="button" className="btn small-btn" disabled={!dirty || busy === t.tier} onClick={() => save(t)}>{busy === t.tier ? '…' : 'Save'}</button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {notice && !error && <p className="saved" role="status">{notice}</p>}
+      {error && <p className="error" role="alert">{error}</p>}
+    </section>
+  );
+}
+
+function BadgeDiscount({ badge, onChange }) {
+  const [pct, setPct] = useState(String(badge.discount_pct ?? 0));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const dirty = Number(pct) !== Number(badge.discount_pct ?? 0);
+  async function save() {
+    setBusy(true); setError(''); setNotice('');
+    try {
+      onChange(await adminSaveBadge({ id: badge.id, discount_pct: Number(pct || 0) }));
+      setNotice(Number(pct) > 0 ? `Holders of ${badge.name} now get ${Number(pct)}% off paid events.` : 'No discount for this badge.');
+    } catch (e) { setError(messageFor(e.code)); } finally { setBusy(false); }
+  }
+  return (
+    <section className="builder" aria-labelledby="disc-h">
+      <h2 className="section-title" id="disc-h">Discount</h2>
+      <p className="muted">Percent off paid events for everyone who holds this badge. They choose whether to use it when signing up; one badge discount per booking.</p>
+      <div className="pct-row">
+        <span className="pct-field">
+          <input className="input pct-input" inputMode="numeric" value={pct} aria-label="Discount percent"
+                 onChange={(e) => setPct(e.target.value.replace(/\D/g, '').slice(0, 3))} />
+          <span>%</span>
+        </span>
+        <button type="button" className="btn small-btn" disabled={!dirty || busy} onClick={save}>{busy ? 'Saving…' : 'Save'}</button>
+      </div>
+      {notice && !error && <p className="saved" role="status">{notice}</p>}
+      {error && <p className="error" role="alert">{error}</p>}
+    </section>
   );
 }

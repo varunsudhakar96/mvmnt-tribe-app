@@ -693,6 +693,28 @@ select.input { appearance: none; background-image: linear-gradient(45deg, transp
 .preview-box { padding: 12px 14px; border: 1.5px dashed var(--wait); border-radius: 12px; }
 .publish-ask { padding: 14px; border: 1.5px solid var(--line); border-radius: 12px; }
 
+/* ---- Badge discounts ---- */
+.disc-list { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.disc-opt {
+  display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; padding: 10px 12px;
+  border: 1.5px solid var(--line); border-radius: 12px; background: var(--bg); color: inherit; font: inherit; cursor: pointer;
+}
+.disc-opt.on { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
+.disc-opt .medal, .disc-opt .badge-img { flex: none; }
+.disc-copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.disc-copy strong { font-size: 15px; }
+.disc-copy small { color: var(--muted); font-size: 13px; }
+.pay-chip.pay-disc { background: var(--ok-bg); color: var(--ok); border-color: var(--ok-line); }
+.perk-list { list-style: none; display: flex; flex-direction: column; gap: 6px; }
+.perk-list li { display: flex; gap: 10px; align-items: baseline; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.perk-list strong { color: var(--ok); white-space: nowrap; }
+.tier-disc-list { list-style: none; display: flex; flex-direction: column; }
+.tier-disc-list li { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.tier-disc-copy { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.pct-field { display: inline-flex; align-items: center; gap: 4px; }
+.pct-input { width: 64px; text-align: right; padding: 8px 10px; }
+.pct-row { display: flex; align-items: center; gap: 12px; }
+
 .program-card { display: flex; flex-direction: column; gap: 12px; padding: 16px 18px; border: 1.5px solid var(--ink); border-radius: 18px; }
 .program-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .program-count { font-family: var(--display); font-weight: 700; font-size: 22px; color: var(--muted); }
