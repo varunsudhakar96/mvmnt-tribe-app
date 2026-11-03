@@ -48,7 +48,7 @@ export function Ticket({ run, name, onDone, backHref }) {
       g.font = '800 54px "Barlow Condensed", "Arial Narrow", sans-serif';
       g.fillText(code, W / 2, 1300);
       g.font = '500 32px Barlow, Arial, sans-serif'; g.fillStyle = '#6b6b6b';
-      g.fillText(venueDue ? `Pay ${rupees(run.price)} at the venue` : paid ? `Paid ${rupees(run.price)}` : 'Show this at the door', W / 2, 1360);
+      g.fillText(run.my_test ? 'TEST TICKET · not a real booking' : venueDue ? `Pay ${rupees(run.price)} at the venue` : paid ? `Paid ${rupees(run.price)}` : 'Show this at the door', W / 2, 1360);
       g.fillText('mvmnttribe', W / 2, 1440);
       const blob = await new Promise((r) => c.toBlob(r, 'image/png'));
       if (!dead && blob) {
@@ -95,6 +95,7 @@ export function Ticket({ run, name, onDone, backHref }) {
           <p className="ticket-name">{name}</p>
           {qr ? <img className="ticket-qr" src={qr} alt={`Ticket QR, code ${code}`} /> : <div className="ticket-qr blank" />}
           <p className="ticket-code" aria-label="Ticket code">{code}</p>
+          {run.my_test && <p className="preview-banner ticket-note">Test ticket · not a real booking</p>}
           {venueDue && <p className="pending-banner ticket-note">Pay {rupees(run.price)} at the venue</p>}
           {paid && <p className="signed-banner ticket-note"><span aria-hidden="true">✓</span> Paid {rupees(run.price)}</p>}
           <p className="hint center">

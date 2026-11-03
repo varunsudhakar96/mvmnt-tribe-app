@@ -80,6 +80,8 @@ const MESSAGES = {
   // online payment
   payments_not_ready: "Online payment isn't switched on yet. Please message the organiser.",
   payment_cancelled: 'Payment not completed, so nothing was booked. Tap Pay to try again.',
+  preview_event: "This event isn't live yet, so real payments are off. Use the test payment instead.",
+  not_preview: 'This event is live now. Pay in the app as usual.',
   order_failed: "Couldn't start the payment. Try again in a minute.",
   bad_signature: "We couldn't confirm that payment. If money left your account, it will show here within a few minutes; otherwise message the organiser.",
   payment_not_complete: 'The payment is still processing. Refresh in a minute.',
@@ -297,6 +299,9 @@ export const adminAddAttendee = (id, phone, km, name, date) => rpc('admin_add_at
 export const adminRemoveAttendee = (id, memberId, date) => rpc('admin_remove_attendee', { p_id: id, p_member: memberId, p_date: date || null });
 export const adminScanTicket = (code, eventId, km) => rpc('admin_scan_ticket', { p_code: code, p_event: eventId || null, p_km: km ?? null });
 export const adminEndEvent = (id, end = true) => rpc('admin_end_event', { p_id: id, p_end: end });
+export const adminClearTests = (id) => rpc('admin_clear_tests', { p_id: id });
+// On a draft (not yet live) event, "paying" confirms the test booking without touching Razorpay.
+export const testPay = (id) => rpc('test_pay', { p_id: id });
 export const adminListBadges = () => rpc('admin_list_badges');
 export const adminSaveBadge = (b) => rpc('admin_save_badge', { p: b });
 export const adminBadgeDetail = (id) => rpc('admin_badge_detail', { p_id: id });
@@ -382,7 +387,9 @@ export async function signedFileUrls(paths, seconds = 3600) {
 export async function shareRun(run) {
   const url = `${window.location.origin}${window.location.pathname}#/run/${run.id}`;
   const when = [runDate(run.date, { weekday: 'short', day: 'numeric', month: 'short' }), runTime(run.time)].filter(Boolean).join(', ');
-  const text = `${run.name}${when ? ` · ${when}` : ''}${run.venue ? ` · ${run.venue}` : ''}. Sign up on the Mvmnt Tribe app:`;
+  const text = run.published === false
+    ? `Preview of "${run.name}" on the Mvmnt Tribe app (not live yet — sign-ups here are tests):`
+    : `${run.name}${when ? ` · ${when}` : ''}${run.venue ? ` · ${run.venue}` : ''}. Sign up on the Mvmnt Tribe app:`;
   if (navigator.share) {
     try { await navigator.share({ title: run.name, text, url }); return 'shared'; }
     catch (e) { if (e?.name === 'AbortError') return 'cancelled'; }

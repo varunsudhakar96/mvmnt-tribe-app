@@ -3,7 +3,7 @@ const Scanner = lazy(() => import('./Scanner.jsx'));
 import QRCode from 'qrcode';
 import {
   adminListRuns, adminMembers, adminSetPayment, adminSaveRun, adminDeleteRun, adminNewQr, adminAddAttendee, adminRemoveAttendee, uploadPoster, normalisePhone,
-  adminEndEvent, adminListBadges, adminSaveBadge, uploadBadgeImage, adminBadgeDetail, adminFindMembers, adminGiveBadge, adminTakeBadge, signedFileUrls, adminScanTicket, readScan,
+  adminEndEvent, adminClearTests, adminListBadges, adminSaveBadge, uploadBadgeImage, adminBadgeDetail, adminFindMembers, adminGiveBadge, adminTakeBadge, signedFileUrls, adminScanTicket, readScan,
   checkinLink, messageFor, runDate, runTime,
 } from './api.js';
 import { go, href } from './router.js';
@@ -413,6 +413,7 @@ function AdminGroup({ title, runs, empty }) {
               <span className="flags">
                 {r.is_today && r.kind !== 'program' && !r.ended && <span className="today">Today</span>}
                 {r.ended && <span className="flag flag-ended">Ended</span>}
+                {r.published === false && <span className="flag flag-draft">Draft</span>}
                 <span className="kind-tag">{KIND_LABEL[r.kind] || 'Run'}</span>
                 {r.signup_count > 0 && <span className="count">{r.signup_count} signed up</span>}
                 {r.pending_count > 0 && <span className="flag flag-pending">{r.pending_count} pending</span>}
@@ -428,7 +429,7 @@ function AdminGroup({ title, runs, empty }) {
 
 // ---------- Add / edit ----------
 const EMPTY = { kind: 'run', name: '', date: '', time: '06:00', venue: '', map_url: '', description: '', run_km: '5', poster_url: '',
-  signup_enabled: true, signup_fields: [], capacity: '', price: '', payment_qr_url: '', upi_id: '', classes: '', badge_id: '', payment_mode: 'online', pay_at_venue: false, checkin_mode: 'venue_qr' };
+  signup_enabled: true, signup_fields: [], capacity: '', price: '', payment_qr_url: '', upi_id: '', classes: '', badge_id: '', payment_mode: 'online', pay_at_venue: false, checkin_mode: 'venue_qr', published: true };
 const CHECKIN = [['venue_qr', 'They scan the venue QR'], ['ticket', 'You scan their ticket'], ['both', 'Either']];
 const KIND_LABEL = { run: 'Run', event: 'Event', program: 'Program' };
 const KIND_HINT = {
@@ -456,6 +457,8 @@ export function AdminRunEdit({ id }) {
   const isProgram = kind === 'program';
   const noun = kind;
   const [endAsk, setEndAsk] = useState(false);
+  const [publishAsk, setPublishAsk] = useState(false); // going live with test sign-ups present: clear or keep?
+  const goingLive = !isNew && saved && saved.published === false && form?.published;
 
   useEffect(() => {
     if (isNew) return;
@@ -466,7 +469,7 @@ export function AdminRunEdit({ id }) {
         setSaved(r);
         setForm({ ...EMPTY, ...Object.fromEntries(Object.keys(EMPTY).map((k) => [k, r[k] ?? ''])),
                   price: r.price ? String(r.price) : '', kind: r.kind || 'run',
-                  classes: r.classes ? String(r.classes) : '', badge_id: r.badge_id || '', payment_mode: r.payment_mode || 'manual', pay_at_venue: !!r.pay_at_venue, checkin_mode: r.checkin_mode || 'venue_qr' });
+                  classes: r.classes ? String(r.classes) : '', badge_id: r.badge_id || '', payment_mode: r.payment_mode || 'manual', pay_at_venue: !!r.pay_at_venue, checkin_mode: r.checkin_mode || 'venue_qr', published: r.published !== false });
       })
       .catch((e) => setError(messageFor(e.code)));
   }, [id, isNew]);
@@ -498,17 +501,19 @@ export function AdminRunEdit({ id }) {
     finally { setBusy(''); }
   }
 
-  async function save(e) {
-    e.preventDefault();
+  async function save(e, keepTests) {
+    e?.preventDefault?.();
+    if (goingLive && saved.test_count > 0 && keepTests === undefined) { setPublishAsk(true); return; }
+    setPublishAsk(false);
     setError(''); setNotice(''); setBusy('save');
     try {
-      const r = await adminSaveRun({ ...form, id: isNew ? null : id });
+      const r = await adminSaveRun({ ...form, id: isNew ? null : id, keep_tests: !!keepTests });
       if (r.run_km) remember(LAST_KM, String(r.run_km));
       remember(LAST_FIELDS, JSON.stringify(r.signup_fields || []));
       setForm((f) => ({ ...f, signup_fields: r.signup_fields || [] }));
       setSaved(r);
       if (isNew) { go(`admin/run/${r.id}`); }
-      setNotice('Saved. Members can see it now.');
+      setNotice(r.published === false ? 'Saved as a draft. Only people with the link can open it.' : 'Saved. Members can see it now.');
     } catch (err) {
       setError(messageFor(err.code));
     } finally {
@@ -519,6 +524,13 @@ export function AdminRunEdit({ id }) {
   async function endIt(end) {
     setBusy('end'); setError('');
     try { setSaved(await adminEndEvent(id, end)); setEndAsk(false); setNotice(end ? 'Ended. It now shows under Past events.' : 'Reopened.'); }
+    catch (err) { setError(messageFor(err.code)); }
+    finally { setBusy(''); }
+  }
+
+  async function clearTests() {
+    setBusy('tests'); setError('');
+    try { setSaved(await adminClearTests(id)); setNotice('Test sign-ups cleared.'); }
     catch (err) { setError(messageFor(err.code)); }
     finally { setBusy(''); }
   }
@@ -686,11 +698,44 @@ export function AdminRunEdit({ id }) {
           )}
         </section>
 
+        <section className="builder" aria-labelledby="vis-h">
+          <h2 className="section-title" id="vis-h">Visibility</h2>
+          <label className="toggle-row live-toggle">
+            <input type="checkbox" checked={!!form.published} onChange={(e) => { setForm((f) => ({ ...f, published: e.target.checked })); setPublishAsk(false); }} />
+            <span>
+              <strong>{form.published ? 'Active · live for members' : 'Draft · hidden from members'}</strong>
+              <small>{form.published
+                ? 'Listed under Events and on the home page. Switch off to take it down without deleting it.'
+                : 'Not listed anywhere, but anyone with the link can open it, sign up, pay (a test payment, no money moves) and be checked in. Those are test entries: they don\'t count for km or badges and are cleared when you go live.'}</small>
+            </span>
+          </label>
+          {!form.published && !isNew && saved && (
+            <div className="stack tight preview-box">
+              <span className="label">Preview link</span>
+              <ShareButton run={saved} label="Share preview link" />
+              {saved.test_count > 0 && (
+                <p className="muted small">{saved.test_count} test {saved.test_count === 1 ? 'entry' : 'entries'} so far.{' '}
+                  <button type="button" className="link inline" onClick={clearTests} disabled={busy === 'tests'}>{busy === 'tests' ? 'Clearing…' : 'Clear them'}</button>
+                </p>
+              )}
+            </div>
+          )}
+        </section>
+
         {error && <p className="error" role="alert">{error}</p>}
         {notice && !error && <p className="saved" role="status">{notice}</p>}
-        <button className="btn" type="submit" disabled={!!busy}>
-          {busy === 'save' ? 'Saving…' : isNew ? `Publish ${noun}` : 'Save changes'}
-        </button>
+        {publishAsk ? (
+          <div className="stack tight publish-ask" role="group" aria-label="Going live">
+            <p className="muted">Going live. There {saved.test_count === 1 ? 'is 1 test entry' : `are ${saved.test_count} test entries`} on this {noun}. Clear them so it starts clean?</p>
+            <button className="btn" type="button" onClick={(e) => save(e, false)} disabled={!!busy}>{busy === 'save' ? 'Saving…' : 'Clear tests & go live'}</button>
+            <button className="btn ghost" type="button" onClick={(e) => save(e, true)} disabled={!!busy}>Keep them as real sign-ups</button>
+            <button className="link" type="button" onClick={() => setPublishAsk(false)}>Cancel</button>
+          </div>
+        ) : (
+          <button className="btn" type="submit" disabled={!!busy}>
+            {busy === 'save' ? 'Saving…' : isNew ? (form.published ? `Publish ${noun}` : 'Save draft') : goingLive ? 'Save & go live' : 'Save changes'}
+          </button>
+        )}
       </form>
 
       {!isNew && saved && <Attendance run={saved} onChange={setSaved} />}
@@ -1185,7 +1230,7 @@ function Signups({ run, onChange }) {
           <ol className="su-list">
             {list.map((p, i) => (
               <li key={`${p.phone}-${i}`}>
-                <div className="su-row"><span>{p.name}</span><span className="muted">{p.phone}</span></div>
+                <div className="su-row"><span>{p.name}{p.test && <span className="pill-mini test-pill">Test</span>}</span><span className="muted">{p.phone}</span></div>
                 {paid && (
                   <div className="pay-row">
                     <span className={`pay-chip pay-${p.status === 'pending' && p.holds === false ? 'cancelled' : payState(p)}`}>
@@ -1350,7 +1395,7 @@ export function AdminScan({ eventId, code }) {
       {phase === 'result' && result && (
         <div className={`scan-result ${ok ? (result.already ? 'again' : 'ok') : 'bad'}`} role="status">
           <p className="scan-big">{ok ? (result.already ? 'Already in' : 'Checked in') : messageFor(result.error)}</p>
-          <p className="scan-name">{result.name}</p>
+          <p className="scan-name">{result.name}{result.test && <span className="pill-mini test-pill">Test</span>}</p>
           <p className="muted">{result.event}{result.phone ? ` · ${result.phone}` : ''}</p>
           {ok && result.kind === 'program' && result.classes && <p className="muted">Class {Math.min(result.done, result.classes)} of {result.classes}{result.badge ? ' · badge earned' : ''}</p>}
           {ok && result.kind === 'run' && result.km != null && <p className="muted">Logged {Number(result.km)} km</p>}

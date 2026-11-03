@@ -1,8 +1,11 @@
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
-import { upcomingRuns, pastEvents, runDetail, checkInRun, shareRun, signUp, cancelSignup, claimPayment, payOnline, uploadSignupFile, prefill, readScan, messageFor, runDate, runTime, formatPhone } from './api.js';
+import { upcomingRuns, pastEvents, runDetail, checkInRun, shareRun, signUp, cancelSignup, claimPayment, payOnline, testPay, uploadSignupFile, prefill, readScan, messageFor, runDate, runTime, formatPhone } from './api.js';
 import { go, href } from './router.js';
 import Badge from './Badge.jsx';
 import { Ticket } from './Ticket.jsx';
+
+// A draft the organiser shared for testing: not listed anywhere, sign-ups and payments are tests.
+const preview = (r) => r && r.published === false;
 const Scanner = lazy(() => import('./Scanner.jsx'));
 
 const digits = (p) => String(p || '').replace(/\D/g, '').slice(-10);
@@ -195,6 +198,7 @@ export function RunPage({ id, profile }) {
         <article className="event">
           {run.poster_url && <img className="event-poster" src={run.poster_url} alt={`${run.name} poster`} />}
           <div className="event-copy">
+            {preview(run) && <p className="preview-banner">Preview · not live yet. Sign-ups here are tests and don't count.</p>}
             {run.ended && <p className="ended-banner">{isProgram(run) ? 'Program ended' : 'Ended'}</p>}
             {run.ended ? null : run.checked_in ? (
               <p className="signed-banner"><span aria-hidden="true">✓</span> {isRun(run) ? `Run logged · ${kmText(run.my_checkin_km)} km` : isProgram(run) ? 'Checked in today' : 'Checked in'}</p>
@@ -287,7 +291,7 @@ function PayCard({ run, onChange }) {
     if (status !== 'venue') return null; // a checkout in progress is nothing yet
     const pay = async () => {
       setBusy(true); setErr('');
-      try { onChange(await payOnline(run.id)); }
+      try { onChange(await (preview(run) ? testPay(run.id) : payOnline(run.id))); }
       catch (e) { setErr(messageFor(e.code)); }
       finally { setBusy(false); }
     };
@@ -295,7 +299,7 @@ function PayCard({ run, onChange }) {
       <section className="pay-card" aria-labelledby="pay-title">
         <h2 className="section-title" id="pay-title">Pay at the venue</h2>
         <p className="muted">You've chosen to pay {rupees(run.price)} at the venue. You can also pay now in the app if that's easier.</p>
-        <button className="btn ghost" onClick={pay} disabled={busy}>{busy ? 'Opening payment…' : `Pay ${rupees(run.price)} now`}</button>
+        <button className="btn ghost" onClick={pay} disabled={busy}>{busy ? 'Opening payment…' : `Pay ${rupees(run.price)} now${preview(run) ? ' (test)' : ''}`}</button>
         {err && <p className={err === messageFor('payment_cancelled') ? 'note' : 'error'} role="alert">{err}</p>}
       </section>
     );
@@ -331,7 +335,7 @@ function PayCard({ run, onChange }) {
   );
 }
 
-export function ShareButton({ run, className = 'share-btn' }) {
+export function ShareButton({ run, className = 'share-btn', label = 'Share' }) {
   const [note, setNote] = useState('');
   async function share() {
     const r = await shareRun(run);
@@ -340,7 +344,7 @@ export function ShareButton({ run, className = 'share-btn' }) {
   return (
     <button type="button" className={className} onClick={share} aria-label={`Share ${run.name}`}>
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 8l5-5 5 5M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6" /></svg>
-      <span>{note || 'Share'}</span>
+      <span>{note || label}</span>
     </button>
   );
 }
@@ -412,7 +416,7 @@ export function SignupPage({ id, profile }) {
         .filter(([, v]) => !isBlank(v)));
       if (payFirst && how === 'pay') {
         await signUp(id, clean, false);          // reserve the spot while they pay (invisible unless paid)
-        try { setDone(await payOnline(id)); }
+        try { setDone(await (preview(run) ? testPay(id) : payOnline(id))); }
         catch (err) {
           if (err.code === 'payment_cancelled') await cancelSignup(id).catch(() => {});
           throw err;
@@ -470,14 +474,16 @@ export function SignupPage({ id, profile }) {
           {!closed && !full && payFirst && (
             <div className="stack tight">
               <button className="btn" type="button" onClick={(e) => submit(e, 'pay')} disabled={!!busy || uploading.length > 0}>
-                {busy === 'pay' ? 'Opening payment…' : uploading.length ? 'Uploading…' : `Pay ${rupees(run.price)} & sign up`}
+                {busy === 'pay' ? 'Opening payment…' : uploading.length ? 'Uploading…' : `Pay ${rupees(run.price)} & sign up${preview(run) ? ' (test)' : ''}`}
               </button>
               {run.pay_at_venue && (
                 <button className="btn ghost" type="button" onClick={(e) => submit(e, 'venue')} disabled={!!busy || uploading.length > 0}>
                   {busy === 'venue' ? 'Saving…' : 'Sign up, pay at the venue'}
                 </button>
               )}
-              <p className="hint center">Your spot is booked only once you pay{run.pay_at_venue ? ', or choose to pay at the venue' : ''}. Secure payment by Razorpay.</p>
+              <p className="hint center">{preview(run)
+                ? 'Preview: no money is charged. The booking is a test and is cleared when the event goes live.'
+                : `Your spot is booked only once you pay${run.pay_at_venue ? ', or choose to pay at the venue' : ''}. Secure payment by Razorpay.`}</p>
             </div>
           )}
         </form>

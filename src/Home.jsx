@@ -170,6 +170,7 @@ function Dashboard({ p }) {
                   <span className="run-name">{u.name}</span>
                   {u.venue && <span className="muted small">{u.venue}</span>}
                   <span className="up-tags">
+                    {u.test && <span className="test-tag">Test</span>}
                     {u.payment === 'venue' && <span className="pending-tag">Pay {rupees(u.price)} at the venue</span>}
                     {u.price > 0 && u.payment === 'confirmed' && <span className="signed-tag">✓ Paid</span>}
                     {u.price > 0 && u.payment === 'claimed' && <span className="pending-tag">Payment being checked</span>}
