@@ -85,6 +85,8 @@ const MESSAGES = {
   bad_discount: "That badge discount isn't available on your account.",
   discounts_off: 'Badge discounts don\'t apply to this event.',
   bad_discount_pct: 'The discount must be between 0 and 100%.',
+  no_login_for_number: "That number doesn't have a login yet, so there's nothing to reset. They can just log in and set a password.",
+  cant_reset_self: "You can't reset your own login from here.",
   order_failed: "Couldn't start the payment. Try again in a minute.",
   bad_signature: "We couldn't confirm that payment. If money left your account, it will show here within a few minutes; otherwise message the organiser.",
   payment_not_complete: 'The payment is still processing. Refresh in a minute.',
@@ -294,6 +296,8 @@ export function readScan(text) {
 // ---- Admin ----
 export const adminListRuns = () => rpc('admin_list_runs');
 export const adminMembers = () => rpc('admin_members');
+// Wipes a member's password so they can set a new one at next login. Runs, badges and bookings stay.
+export const adminResetLogin = (phone) => rpc('admin_reset_login', { p_phone: phone });
 export const adminSetPayment = (id, memberId, status) => rpc('admin_set_payment', { p_id: id, p_member: memberId, p_status: status });
 export const adminSaveRun = (run) => rpc('admin_save_run', { p: run });
 export const adminDeleteRun = (id) => rpc('admin_delete_run', { p_id: id });

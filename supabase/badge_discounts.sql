@@ -184,8 +184,7 @@ begin
     if not _holds_spot(existing, e) and e.capacity is not null and _spots_taken(e) >= e.capacity then raise exception 'run_full'; end if;
     update registrations set answers = clean, pending_since = now(), discount_badge = v_disc, discount_pct = v_pct,
       payment_status = case when p_venue then 'venue' else payment_status end,
-      status = case when v_due = 0 then 'confirmed' else status end,
-      amount_inr = case when v_due = 0 then 0 else amount_inr end
+      status = case when v_due = 0 then 'confirmed' else status end
       where id = existing.id;
     return _run_public(e);
   end if;
@@ -195,7 +194,7 @@ begin
   v_status := case when v_due > 0 then 'pending' else 'confirmed' end;
   v_pay := case when v_due = 0 and coalesce(e.price_inr, 0) > 0 then 'confirmed' when p_venue then 'venue' else 'none' end;
   insert into registrations (member_id, event_id, status, pass_code, answers, payment_status, pending_since, is_test, discount_badge, discount_pct, amount_inr)
-  values (m.id, e.id, v_status, gen_pass_code(), clean, v_pay, now(), not e.published, v_disc, v_pct, case when v_due = 0 and coalesce(e.price_inr, 0) > 0 then 0 end)
+  values (m.id, e.id, v_status, gen_pass_code(), clean, v_pay, now(), not e.published, v_disc, v_pct, 0)
   on conflict (member_id, event_id) do update set status = excluded.status, answers = excluded.answers,
     payment_status = excluded.payment_status, pending_since = now(), razorpay_order_id = null, razorpay_payment_id = null,
     attended = false, attended_at = null, is_test = excluded.is_test,
@@ -535,3 +534,21 @@ begin
   end if;
   return _run_admin(e);
 end $$;
+
+-- Organiser resets a member's login (Admin → Members → Reset login). Password wiped; member row, km, badges, bookings untouched.
+create or replace function public.admin_reset_login(p_phone text) returns json
+language plpgsql security definer set search_path to 'public' as $$
+declare v_member members; v_digits text;
+begin
+  if not is_admin() then raise exception 'not_admin'; end if;
+  v_digits := right(regexp_replace(coalesce(p_phone,''), '\D', '', 'g'), 10);
+  if v_digits !~ '^[6-9][0-9]{9}$' then raise exception 'invalid_phone'; end if;
+  select * into v_member from members where auth_user_id is not null
+    and (sheet_key = v_digits or right(regexp_replace(coalesce(phone,''), '\D', '', 'g'), 10) = v_digits)
+    order by created_at limit 1;
+  if v_member.id is null then raise exception 'no_login_for_number'; end if;
+  if v_member.auth_user_id = auth.uid() then raise exception 'cant_reset_self'; end if;
+  delete from auth.users where id = v_member.auth_user_id;
+  return json_build_object('ok', true, 'name', v_member.name, 'phone', v_digits);
+end $$;
+grant execute on function public.admin_reset_login(text) to authenticated;

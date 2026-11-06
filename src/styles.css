@@ -937,3 +937,8 @@ select.input { appearance: none; background-image: linear-gradient(45deg, transp
 .up-copy .run-name { font-size: 18px; }
 .up-tags { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 2px; }
 .up-ticket { flex: none; height: 40px; padding: 0 14px; }
+
+/* ---- Members: reset login ---- */
+.reset-link { align-self: flex-start; margin-top: 4px; font-size: 14px; }
+.reset-ask { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; padding: 10px 12px; border: 1.5px dashed var(--wait); border-radius: 10px; }
+.row-actions { display: flex; align-items: center; gap: 14px; }

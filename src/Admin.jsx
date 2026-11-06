@@ -3,7 +3,7 @@ const Scanner = lazy(() => import('./Scanner.jsx'));
 import QRCode from 'qrcode';
 import {
   adminListRuns, adminMembers, adminSetPayment, adminSaveRun, adminDeleteRun, adminNewQr, adminAddAttendee, adminRemoveAttendee, uploadPoster, normalisePhone,
-  adminEndEvent, adminClearTests, adminTierDiscounts, adminSetTierDiscount, adminListBadges, adminSaveBadge, uploadBadgeImage, adminBadgeDetail, adminFindMembers, adminGiveBadge, adminTakeBadge, signedFileUrls, adminScanTicket, readScan,
+  adminEndEvent, adminClearTests, adminResetLogin, adminTierDiscounts, adminSetTierDiscount, adminListBadges, adminSaveBadge, uploadBadgeImage, adminBadgeDetail, adminFindMembers, adminGiveBadge, adminTakeBadge, signedFileUrls, adminScanTicket, readScan,
   checkinLink, messageFor, runDate, runTime,
 } from './api.js';
 import { go, href } from './router.js';
@@ -49,8 +49,25 @@ export function AdminMembers() {
   const [q, setQ] = useState('');
   const [recent, setRecent] = useState(true);
   const [copied, setCopied] = useState('');
+  const [resetAsk, setResetAsk] = useState(null);   // phone awaiting confirmation
+  const [resetBusy, setResetBusy] = useState('');
+  const [resetDone, setResetDone] = useState(null); // { name, phone } just reset
+  const [resetErr, setResetErr] = useState('');
 
   useEffect(() => { adminMembers().then(setData).catch((e) => setError(messageFor(e.code))); }, []);
+
+  async function resetLogin(p) {
+    setResetBusy(p.phone); setResetErr('');
+    try {
+      const r = await adminResetLogin(p.phone);
+      setResetDone(r); setResetAsk(null);
+      // they're no longer "joined" until they set a new password
+      setData((d) => d && { ...d, joined: d.joined.filter((x) => x.phone !== p.phone), not_joined: [{ ...p, last_run: p.last_run || null }, ...(d.not_joined || [])],
+        totals: { ...d.totals, accounts: Math.max(0, d.totals.accounts - 1), not_joined: d.totals.not_joined + 1 } });
+    } catch (e) { setResetErr(messageFor(e.code)); }
+    finally { setResetBusy(''); }
+  }
+  const resetMsg = (r) => `Hi ${String(r.name || '').split(' ')[0]}, your Mvmnt Tribe app login has been reset. Open mvmnttribe.com, tap Log in, enter your number and set a new password. Your runs and badges are all still there.`;
 
   const t = data?.totals;
   const cutoff = new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10);
@@ -123,11 +140,30 @@ export function AdminMembers() {
             {view === 'joined' && (
               <section aria-label="Runners on the app">
                 <p className="hint">{joined.length} {joined.length === 1 ? 'account' : 'accounts'} · newest first</p>
+                {resetDone && (
+                  <div className="note stack tight" role="status">
+                    <p><strong>{resetDone.name}</strong>'s login is reset. They log in with their number and set a new password; nothing else changes.</p>
+                    <a className="btn ghost" href={`https://wa.me/91${resetDone.phone}?text=${encodeURIComponent(resetMsg(resetDone))}`} target="_blank" rel="noreferrer">Tell them on WhatsApp</a>
+                    <button type="button" className="link" onClick={() => setResetDone(null)}>Done</button>
+                  </div>
+                )}
+                {resetErr && <p className="error" role="alert">{resetErr}</p>}
                 <ol className="su-list">
                   {joined.map((p) => (
                     <li key={`${p.phone}-${p.name}`}>
                       <div className="su-row"><span>{p.name}</span><strong className="tabular">{Number(p.km)} km</strong></div>
                       <span className="muted small">{fmtPhone(p.phone)} · joined {ago(p.joined)} · last opened {ago(p.last_seen)}</span>
+                      {resetAsk === p.phone ? (
+                        <div className="reset-ask">
+                          <span className="muted small">Wipe {p.name.split(' ')[0]}'s password? They'll set a new one at next login. Runs, badges and bookings stay.</span>
+                          <div className="row-actions">
+                            <button type="button" className="btn small-btn" disabled={resetBusy === p.phone} onClick={() => resetLogin(p)}>{resetBusy === p.phone ? 'Resetting…' : 'Yes, reset login'}</button>
+                            <button type="button" className="link" onClick={() => setResetAsk(null)}>Cancel</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <button type="button" className="link small reset-link" onClick={() => { setResetAsk(p.phone); setResetDone(null); setResetErr(''); }}>Reset login</button>
+                      )}
                     </li>
                   ))}
                 </ol>
