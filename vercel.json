@@ -1,0 +1,16 @@
+{
+  "redirects": [
+    {
+      "source": "/:path*",
+      "has": [{ "type": "host", "value": "mvmnt-tribe-app.vercel.app" }],
+      "destination": "https://mvmnttribe.com/:path*",
+      "permanent": true
+    },
+    {
+      "source": "/:path*",
+      "has": [{ "type": "host", "value": "www.mvmnttribe.com" }],
+      "destination": "https://mvmnttribe.com/:path*",
+      "permanent": true
+    }
+  ]
+}
