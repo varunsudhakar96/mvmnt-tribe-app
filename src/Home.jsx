@@ -171,6 +171,8 @@ function Dashboard({ p }) {
                   {u.venue && <span className="muted small">{u.venue}</span>}
                   <span className="up-tags">
                     {u.test && <span className="test-tag">Test</span>}
+                    {u.started && !u.class_today && <span className="live-tag">In progress{u.next_class ? ` · next class ${runDate(u.next_class, { weekday: 'short', day: 'numeric', month: 'short' })}` : ''}</span>}
+                    {u.started && u.class_today && <span className="today">Class today</span>}
                     {u.payment === 'venue' && <span className="pending-tag">Pay {rupees(u.due ?? u.price)} at the venue</span>}
                     {u.price > 0 && u.payment === 'confirmed' && <span className="signed-tag">✓ Paid</span>}
                     {u.price > 0 && u.payment === 'claimed' && <span className="pending-tag">Payment being checked</span>}

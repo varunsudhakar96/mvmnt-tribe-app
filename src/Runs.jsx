@@ -6,6 +6,9 @@ import { Ticket } from './Ticket.jsx';
 
 // A draft the organiser shared for testing: not listed anywhere, sign-ups and payments are tests.
 const preview = (r) => r && r.published === false;
+// A program whose first class has happened and that hasn't been ended.
+const ongoing = (r) => r && r.kind === 'program' && r.started && !r.ended;
+const nextClass = (r) => (r?.next_class ? runDate(r.next_class, { weekday: 'short', day: 'numeric', month: 'short' }) : '');
 const Scanner = lazy(() => import('./Scanner.jsx'));
 
 const digits = (p) => String(p || '').replace(/\D/g, '').slice(-10);
@@ -49,7 +52,39 @@ export function UpcomingRuns() {
   }, []);
   useEffect(() => { load(); }, [load]);
 
+  const live = (runs || []).filter(ongoing);
+  const coming = (runs || []).filter((r) => !ongoing(r));
   return (
+    <>
+    {live.length > 0 && (
+      <section aria-labelledby="ongoing" className="ongoing-section">
+        <h2 className="section-title" id="ongoing">Ongoing</h2>
+        <ul className="run-cards">
+          {live.map((r) => (
+            <li key={r.id}>
+              <a className="run-card" href={href(`run/${r.id}`)}>
+                <Poster src={r.poster_url} alt="" className="run-thumb" />
+                <span className="run-card-copy">
+                  <span className="run-when">
+                    <span className="live-tag">In progress</span>
+                    {KIND_TAG[r.kind] && <span className="kind-tag">{KIND_TAG[r.kind]}</span>}
+                    {`Started ${runDate(r.date, { day: 'numeric', month: 'short' })}`}
+                  </span>
+                  <span className="run-name">{r.name}</span>
+                  {r.venue && <span className="muted run-venue">{r.venue}</span>}
+                  <span className="muted run-venue">
+                    {r.classes ? `${r.classes} classes` : ''}{r.my_classes ? ` · you've done ${r.my_classes}` : ''}
+                    {r.class_today ? ' · class today' : r.next_class ? ` · next class ${nextClass(r)}` : ''}
+                  </span>
+                  {holding(r) ? <span className="signed-tag">✓ You're in</span> : <span className="muted small">Sign-ups closed</span>}
+                </span>
+                <span className="chev" aria-hidden="true">›</span>
+              </a>
+            </li>
+          ))}
+        </ul>
+      </section>
+    )}
     <section aria-labelledby="upcoming">
       <h2 className="section-title" id="upcoming">Coming up</h2>
       {error && (
@@ -58,10 +93,10 @@ export function UpcomingRuns() {
         </p>
       )}
       {!error && runs === undefined && <p className="muted">Loading runs…</p>}
-      {runs && runs.length === 0 && <p className="muted">No runs posted yet. Check back soon.</p>}
-      {runs && runs.length > 0 && (
+      {runs && coming.length === 0 && <p className="muted">{live.length ? 'Nothing else posted yet.' : 'No runs posted yet. Check back soon.'}</p>}
+      {runs && coming.length > 0 && (
         <ul className="run-cards">
-          {runs.map((r) => (
+          {coming.map((r) => (
             <li key={r.id}>
               <a className="run-card" href={href(`run/${r.id}`)}>
                 <Poster src={r.poster_url} alt="" className="run-thumb" />
@@ -85,6 +120,7 @@ export function UpcomingRuns() {
         </ul>
       )}
     </section>
+    </>
   );
 }
 
@@ -144,6 +180,8 @@ export function ProgramProgress({ run }) {
             : <>Check in to all {total} classes to earn <strong>{run.badge.name}</strong>.</>}
         </p>
       )}
+      {!run.ended && (run.class_today ? <p className="muted small">Class today. Scan the venue QR to check in.</p>
+        : run.next_class ? <p className="muted small">Next class {nextClass(run)}.</p> : null)}
     </section>
   );
 }
@@ -200,6 +238,7 @@ export function RunPage({ id, profile }) {
           <div className="event-copy">
             {preview(run) && <p className="preview-banner">Preview · not live yet. Sign-ups here are tests and don't count.</p>}
             {run.ended && <p className="ended-banner">{isProgram(run) ? 'Program ended' : 'Ended'}</p>}
+            {ongoing(run) && <p className="live-banner">In progress · started {runDate(run.date, { day: 'numeric', month: 'short' })}{run.class_today ? ' · class today' : run.next_class ? ` · next class ${nextClass(run)}` : ''}</p>}
             {run.ended ? null : run.checked_in ? (
               <p className="signed-banner"><span aria-hidden="true">✓</span> {isRun(run) ? `Run logged · ${kmText(run.my_checkin_km)} km` : isProgram(run) ? 'Checked in today' : 'Checked in'}</p>
             ) : run.signed_up && !run.is_past ? (
@@ -352,14 +391,17 @@ export function ShareButton({ run, className = 'share-btn', label = 'Share' }) {
 
 function RunActions({ run, loggedIn }) {
   if (run.is_past) return null;
-  const attendLive = run.check_in_live && venueScan(run);
+  // Programs: check-in is only for people who are signed up.
+  const attendLive = run.check_in_live && venueScan(run) && (!isProgram(run) || holding(run) || run.my_classes > 0);
   const checkedIn = run.checked_in;
   const attendLabel = isRun(run) ? 'Attend run' : isProgram(run) ? 'Check in to class' : 'Check in';
   const attendLocked = !attendLive && run.signed_up && venueScan(run) && (isProgram(run) || !run.is_today);
   const showTicket = holding(run) && !venueScan(run) && !(checkedIn && !isProgram(run));
-  const canSignup = run.signup_enabled && !holding(run) && !checkedIn && !(run.my_classes > 0);
+  const open = run.signups_open ?? run.signup_enabled;
+  const closedNow = ongoing(run) && !open && !holding(run) && !(run.my_classes > 0); // started, no late joining
+  const canSignup = open && !holding(run) && !checkedIn && !(run.my_classes > 0);
   const full = canSignup && run.capacity != null && run.spots_left <= 0;
-  if (!attendLive && !attendLocked && !canSignup && !showTicket) return null;
+  if (!attendLive && !attendLocked && !canSignup && !showTicket && !closedNow) return null;
   const to = (path) => (loggedIn ? href(path) : href(`login?next=${path}`));
   return (
     <div className="dock">
@@ -371,6 +413,12 @@ function RunActions({ run, loggedIn }) {
           <div className="locked">
             <button className="btn" disabled aria-describedby="attend-note">{attendLabel}</button>
             <p className="hint" id="attend-note">{isProgram(run) ? 'Activates at the first class.' : 'Activates on the day.'} Scan the QR at the venue to check in.</p>
+          </div>
+        )}
+        {closedNow && (
+          <div className="locked">
+            <button className="btn" disabled>Sign-ups closed</button>
+            <p className="hint">This program is already under way.</p>
           </div>
         )}
         {canSignup && (full
@@ -443,7 +491,7 @@ export function SignupPage({ id, profile }) {
   if (done) return <Ticket run={done} name={profile?.name} onDone={() => go(`run/${id}`)} />;
 
   const editing = holding(run);
-  const closed = run && (run.is_past || !run.signup_enabled);
+  const closed = run && (run.is_past || !(run.signups_open ?? run.signup_enabled)) && !holding(run);
   const full = run && !editing && run.capacity != null && run.spots_left <= 0;
 
   return (
@@ -465,7 +513,7 @@ export function SignupPage({ id, profile }) {
             <span className="muted tabular">{formatPhone(digits(profile?.phone))}</span>
           </div>
 
-          {closed && <p className="note">{messageFor(run.is_past ? 'run_over' : 'signups_closed')}</p>}
+          {closed && <p className="note">{messageFor(run.is_past ? 'run_over' : ongoing(run) && run.signup_enabled ? 'program_started' : 'signups_closed')}</p>}
           {full && <p className="note">{messageFor('run_full')}</p>}
 
           {!closed && !full && fields.map((f) => (
@@ -688,7 +736,8 @@ export function CheckInPage({ id, code, onLogged }) {
         setRun(r);
         if (r) setKm(kmText(r.my_checkin_km ?? r.run_km ?? 5));
         if (r && !venueScan(r)) setError(messageFor('ticket_only'));
-        else if (r && !r.check_in_live) setError(messageFor(r.ended ? 'event_ended' : isProgram(r) && !r.is_past ? 'program_not_started' : 'not_today'));
+        else if (r && isProgram(r) && !r.ended && !(holding(r) || r.my_classes > 0)) setError(messageFor('program_not_joined'));
+        else if (r && !r.check_in_live) setError(messageFor(r.ended ? 'event_ended' : isProgram(r) && !r.is_past ? (r.started ? 'not_class_day' : 'program_not_started') : 'not_today'));
       })
       .catch((e) => setError(messageFor(e.code)));
   }, [id]);
@@ -706,7 +755,7 @@ export function CheckInPage({ id, code, onLogged }) {
 
   if (result) return <RunLogged r={result} onDone={() => go('')} />;
 
-  const blocked = run === null || (run && (!run.check_in_live || !venueScan(run)));
+  const blocked = run === null || (run && (!run.check_in_live || !venueScan(run) || (isProgram(run) && !(holding(run) || run.my_classes > 0))));
   return (
     <main className="shell">
       <header className="topbar"><a className="link back" href={href(`run/${id}`)}>‹ Back</a></header>
@@ -750,6 +799,7 @@ function RunLogged({ r, onDone }) {
           <div className="tick" aria-hidden="true"><svg viewBox="0 0 52 52"><path d="M14 27l8 8 16-18" /></svg></div>
           <h1 className="display">{r.first_time ? `Class ${done} done.` : 'Already in today.'}</h1>
           <p className="lede">{r.first_time ? <>You're checked in to <strong>{r.run}</strong>.</> : <>You'd already checked in to <strong>{r.run}</strong> today. One check-in per class.</>}</p>
+          {r.next_class && <p className="muted">Next class {runDate(r.next_class, { weekday: 'long', day: 'numeric', month: 'short' })}.</p>}
           {total > 0 && (
             <>
               <p className="logged-km">{done}<span>of {total}</span></p>

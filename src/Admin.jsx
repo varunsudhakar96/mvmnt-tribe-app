@@ -455,6 +455,7 @@ function AdminGroup({ title, runs, empty }) {
                 {r.is_today && r.kind !== 'program' && !r.ended && <span className="today">Today</span>}
                 {r.ended && <span className="flag flag-ended">Ended</span>}
                 {r.published === false && <span className="flag flag-draft">Draft</span>}
+                {r.kind === 'program' && r.started && !r.ended && <span className="flag flag-live">In progress</span>}
                 <span className="kind-tag">{KIND_LABEL[r.kind] || 'Run'}</span>
                 {r.signup_count > 0 && <span className="count">{r.signup_count} signed up</span>}
                 {r.pending_count > 0 && <span className="flag flag-pending">{r.pending_count} pending</span>}
@@ -470,7 +471,7 @@ function AdminGroup({ title, runs, empty }) {
 
 // ---------- Add / edit ----------
 const EMPTY = { kind: 'run', name: '', date: '', time: '06:00', venue: '', map_url: '', description: '', run_km: '5', poster_url: '',
-  signup_enabled: true, signup_fields: [], capacity: '', price: '', payment_qr_url: '', upi_id: '', classes: '', badge_id: '', payment_mode: 'online', pay_at_venue: false, checkin_mode: 'venue_qr', published: true, discounts_allowed: true };
+  signup_enabled: true, signup_fields: [], capacity: '', price: '', payment_qr_url: '', upi_id: '', classes: '', badge_id: '', payment_mode: 'online', pay_at_venue: false, checkin_mode: 'venue_qr', published: true, discounts_allowed: true, class_dates: [], late_join: false };
 const CHECKIN = [['venue_qr', 'They scan the venue QR'], ['ticket', 'You scan their ticket'], ['both', 'Either']];
 const KIND_LABEL = { run: 'Run', event: 'Event', program: 'Program' };
 const KIND_HINT = {
@@ -502,7 +503,7 @@ export function AdminRunEdit({ id }) {
   const goingLive = !isNew && saved && saved.published === false && form?.published;
 
   useEffect(() => {
-    if (isNew) return;
+    if (isNew) { setForm({ ...EMPTY, run_km: recall(LAST_KM) || '5', signup_fields: lastFields() }); setSaved(null); setError(''); setNotice(''); return; } // fresh form when coming from an edit page
     adminListRuns()
       .then((all) => {
         const r = all.find((x) => x.id === id);
@@ -510,7 +511,7 @@ export function AdminRunEdit({ id }) {
         setSaved(r);
         setForm({ ...EMPTY, ...Object.fromEntries(Object.keys(EMPTY).map((k) => [k, r[k] ?? ''])),
                   price: r.price ? String(r.price) : '', kind: r.kind || 'run',
-                  classes: r.classes ? String(r.classes) : '', badge_id: r.badge_id || '', payment_mode: r.payment_mode || 'manual', pay_at_venue: !!r.pay_at_venue, checkin_mode: r.checkin_mode || 'venue_qr', published: r.published !== false, discounts_allowed: r.discounts_allowed !== false });
+                  classes: r.classes ? String(r.classes) : '', badge_id: r.badge_id || '', payment_mode: r.payment_mode || 'manual', pay_at_venue: !!r.pay_at_venue, checkin_mode: r.checkin_mode || 'venue_qr', published: r.published !== false, discounts_allowed: r.discounts_allowed !== false, class_dates: r.class_dates || [], late_join: !!r.late_join });
       })
       .catch((e) => setError(messageFor(e.code)));
   }, [id, isNew]);
@@ -654,10 +655,18 @@ export function AdminRunEdit({ id }) {
         {isProgram && (
           <section className="builder" aria-labelledby="prog-h">
             <h2 className="section-title" id="prog-h">Program</h2>
-            <Field label="Number of classes" required hint="How many times people check in to complete it, e.g. 4 for a once-a-week, 4-week program. One check-in per person per day.">
-              <input className="input" inputMode="numeric" value={form.classes ?? ''} placeholder="4"
+            <ClassDates dates={form.class_dates || []} start={form.date} onChange={(d) => setForm((f) => ({ ...f, class_dates: d, classes: d.length ? String(d.length) : f.classes }))} />
+            <Field label="Number of classes" required hint={(form.class_dates || []).length ? 'Set by the class dates above.' : 'How many times people check in to complete it, e.g. 4 for a once-a-week, 4-week program. One check-in per person per day, any day from the start date.'}>
+              <input className="input" inputMode="numeric" value={form.classes ?? ''} placeholder="4" disabled={(form.class_dates || []).length > 0}
                      onChange={(e) => setForm((f) => ({ ...f, classes: e.target.value.replace(/\D/g, '').slice(0, 3) }))} />
             </Field>
+            <label className="toggle-row">
+              <input type="checkbox" checked={!!form.late_join} onChange={(e) => setForm((f) => ({ ...f, late_join: e.target.checked }))} />
+              <span>
+                <strong>Allow joining after it starts</strong>
+                <small>Off: sign-ups close automatically once the first class date arrives (you can still add people by number). On: people can sign up mid-way.</small>
+              </span>
+            </label>
             <BadgePicker value={form.badge_id} classes={form.classes} onChange={(v) => setForm((f) => ({ ...f, badge_id: v }))} />
           </section>
         )}
@@ -1558,5 +1567,46 @@ function BadgeDiscount({ badge, onChange }) {
       {notice && !error && <p className="saved" role="status">{notice}</p>}
       {error && <p className="error" role="alert">{error}</p>}
     </section>
+  );
+}
+
+
+// ---------- Program class dates ----------
+function ClassDates({ dates, start, onChange }) {
+  const [adding, setAdding] = useState('');
+  const sorted = [...dates].sort();
+  const add = () => {
+    if (!adding || dates.includes(adding)) { setAdding(''); return; }
+    onChange([...dates, adding].sort()); setAdding('');
+  };
+  const weekly = (n) => {
+    // n classes, one a week from the start date
+    if (!start) return;
+    const out = []; const d = new Date(start + 'T00:00:00');
+    for (let i = 0; i < n; i++) { out.push(d.toISOString().slice(0, 10)); d.setDate(d.getDate() + 7); }
+    onChange(out);
+  };
+  return (
+    <div className="field">
+      <span className="label">Class dates <span className="muted">(optional)</span></span>
+      <span className="hint">When set, check-in works only on these days and the class count follows. Leave empty to allow a check-in on any day from the start date.</span>
+      {sorted.length > 0 && (
+        <ul className="date-chips" aria-label="Class dates">
+          {sorted.map((d, i) => (
+            <li key={d}>
+              <span>{i + 1}. {runDate(d, { weekday: 'short', day: 'numeric', month: 'short' })}</span>
+              <button type="button" className="chip-x" aria-label={`Remove ${d}`} onClick={() => onChange(dates.filter((x) => x !== d))}>×</button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="row-actions">
+        <input className="input" type="date" value={adding} min={start || undefined} aria-label="Add a class date" onChange={(e) => setAdding(e.target.value)} />
+        <button type="button" className="btn small-btn" onClick={add} disabled={!adding}>Add</button>
+      </div>
+      {start && sorted.length === 0 && (
+        <p className="muted small">Quick fill: <button type="button" className="link inline" onClick={() => weekly(4)}>4 weekly classes</button> · <button type="button" className="link inline" onClick={() => weekly(6)}>6</button> · <button type="button" className="link inline" onClick={() => weekly(8)}>8</button> from the start date.</p>
+      )}
+    </div>
   );
 }

@@ -66,6 +66,10 @@ const MESSAGES = {
   // programs, badges, ending
   event_ended: 'This has ended. Check-in is closed.',
   program_not_started: "This program hasn't started yet. Check in from the first class.",
+  program_started: 'This program has already started, so sign-ups are closed.',
+  program_not_joined: "Check-in is only for people who signed up for this program.",
+  not_class_day: "There's no class today, so there's nothing to check in to.",
+  bad_class_date: "That date isn't one of this program's class days.",
   classes_required: 'Enter how many classes the program has (1 to 100).',
   bad_class_date: 'Pick a class date between the start date and today.',
   badge_not_found: 'That badge no longer exists. Pick another.',

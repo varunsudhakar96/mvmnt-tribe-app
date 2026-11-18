@@ -942,3 +942,12 @@ select.input { appearance: none; background-image: linear-gradient(45deg, transp
 .reset-link { align-self: flex-start; margin-top: 4px; font-size: 14px; }
 .reset-ask { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; padding: 10px 12px; border: 1.5px dashed var(--wait); border-radius: 10px; }
 .row-actions { display: flex; align-items: center; gap: 14px; }
+
+/* ---- Ongoing programs ---- */
+.live-tag { display: inline-flex; align-items: center; gap: 6px; margin-right: 8px; font-weight: 800; font-size: 12px; letter-spacing: .04em; text-transform: uppercase; color: var(--ok); }
+.live-tag::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px var(--ok-bg); }
+.live-banner { align-self: flex-start; display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px; background: var(--ok-bg); border: 1.5px solid var(--ok-line); color: var(--ok); font-weight: 700; font-size: 14px; }
+.flag.flag-live { color: var(--ok); background: var(--ok-bg); border: 1px solid var(--ok-line); padding: 0 7px; border-radius: 6px; }
+.date-chips { list-style: none; display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.date-chips li { display: inline-flex; align-items: center; gap: 6px; padding: 6px 8px 6px 12px; border: 1.5px solid var(--line); border-radius: 999px; font-size: 14px; }
+.chip-x { border: 0; background: transparent; font-size: 18px; line-height: 1; padding: 0 4px; color: var(--muted); cursor: pointer; }
