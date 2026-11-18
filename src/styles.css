@@ -612,8 +612,10 @@ select.input { appearance: none; background-image: linear-gradient(45deg, transp
 .center-row { justify-content: center; gap: 18px; }
 
 /* ---- Admin: tabs + members ---- */
-.tabs { display: flex; gap: 6px; margin: -18px 0 22px; border-bottom: 1px solid var(--line); }
-.tabs a { padding: 10px 4px; margin-right: 14px; color: var(--muted); text-decoration: none; font-family: var(--display); font-weight: 800; font-size: 18px; letter-spacing: 0.06em; text-transform: uppercase; border-bottom: 3px solid transparent; margin-bottom: -1px; }
+.tabs { display: flex; gap: 0; margin: -18px 0 22px; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
+.tabs::-webkit-scrollbar { display: none; }
+.tabs a { flex: none; padding: 10px 4px; margin-right: 14px; color: var(--muted); text-decoration: none; font-family: var(--display); font-weight: 800; font-size: 17px; letter-spacing: 0.04em; text-transform: uppercase; border-bottom: 3px solid transparent; margin-bottom: -1px; white-space: nowrap; }
+@media (max-width: 340px) { .tabs a { font-size: 15px; margin-right: 10px; } }
 .tabs a.on { color: var(--ink); border-bottom-color: var(--ink); }
 .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .tiles div { padding: 14px; border: 1px solid var(--line); border-radius: 14px; display: flex; flex-direction: column; gap: 2px; }
@@ -951,3 +953,12 @@ select.input { appearance: none; background-image: linear-gradient(45deg, transp
 .date-chips { list-style: none; display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
 .date-chips li { display: inline-flex; align-items: center; gap: 6px; padding: 6px 8px 6px 12px; border: 1.5px solid var(--line); border-radius: 999px; font-size: 14px; }
 .chip-x { border: 0; background: transparent; font-size: 18px; line-height: 1; padding: 0 4px; color: var(--muted); cursor: pointer; }
+
+/* ---- Participation terms ---- */
+.terms { display: flex; flex-direction: column; gap: 10px; padding: 14px; border: 1.5px solid var(--line); border-radius: 14px; background: var(--field); }
+.terms-text { display: flex; flex-direction: column; gap: 8px; font-size: 14px; line-height: 1.5; color: var(--ink); }
+.terms-text.clipped { max-height: 7.5em; overflow: hidden; -webkit-mask-image: linear-gradient(#000 60%, transparent); mask-image: linear-gradient(#000 60%, transparent); }
+.agree-row { display: flex; gap: 12px; align-items: flex-start; font-weight: 600; font-size: 15px; cursor: pointer; }
+.agree-row input { width: 22px; height: 22px; flex: none; margin-top: 1px; accent-color: var(--ink); }
+.terms-edit { font: inherit; font-size: 15px; line-height: 1.5; min-height: 240px; resize: vertical; }
+.pill-mini.warn-pill { background: var(--wait-bg); color: var(--wait); border: 1px solid var(--wait-line); }

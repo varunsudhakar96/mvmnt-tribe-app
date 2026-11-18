@@ -3,7 +3,7 @@ const Scanner = lazy(() => import('./Scanner.jsx'));
 import QRCode from 'qrcode';
 import {
   adminListRuns, adminMembers, adminSetPayment, adminSaveRun, adminDeleteRun, adminNewQr, adminAddAttendee, adminRemoveAttendee, uploadPoster, normalisePhone,
-  adminEndEvent, adminClearTests, adminResetLogin, adminTierDiscounts, adminSetTierDiscount, adminListBadges, adminSaveBadge, uploadBadgeImage, adminBadgeDetail, adminFindMembers, adminGiveBadge, adminTakeBadge, signedFileUrls, adminScanTicket, readScan,
+  adminEndEvent, adminClearTests, adminResetLogin, adminWaiver, adminSetWaiver, adminTierDiscounts, adminSetTierDiscount, adminListBadges, adminSaveBadge, uploadBadgeImage, adminBadgeDetail, adminFindMembers, adminGiveBadge, adminTakeBadge, signedFileUrls, adminScanTicket, readScan,
   checkinLink, messageFor, runDate, runTime,
 } from './api.js';
 import { go, href } from './router.js';
@@ -29,6 +29,7 @@ function AdminTabs({ active }) {
       <a className={active === 'runs' ? 'on' : ''} href={href('admin')} aria-current={active === 'runs' ? 'page' : undefined}>Events</a>
       <a className={active === 'members' ? 'on' : ''} href={href('admin/members')} aria-current={active === 'members' ? 'page' : undefined}>Members</a>
       <a className={active === 'badges' ? 'on' : ''} href={href('admin/badges')} aria-current={active === 'badges' ? 'page' : undefined}>Badges</a>
+      <a className={active === 'terms' ? 'on' : ''} href={href('admin/terms')} aria-current={active === 'terms' ? 'page' : undefined}>Terms</a>
     </nav>
   );
 }
@@ -471,7 +472,7 @@ function AdminGroup({ title, runs, empty }) {
 
 // ---------- Add / edit ----------
 const EMPTY = { kind: 'run', name: '', date: '', time: '06:00', venue: '', map_url: '', description: '', run_km: '5', poster_url: '',
-  signup_enabled: true, signup_fields: [], capacity: '', price: '', payment_qr_url: '', upi_id: '', classes: '', badge_id: '', payment_mode: 'online', pay_at_venue: false, checkin_mode: 'venue_qr', published: true, discounts_allowed: true, class_dates: [], late_join: false };
+  signup_enabled: true, signup_fields: [], capacity: '', price: '', payment_qr_url: '', upi_id: '', classes: '', badge_id: '', payment_mode: 'online', pay_at_venue: false, checkin_mode: 'venue_qr', published: true, discounts_allowed: true, class_dates: [], late_join: false, waiver_required: true };
 const CHECKIN = [['venue_qr', 'They scan the venue QR'], ['ticket', 'You scan their ticket'], ['both', 'Either']];
 const KIND_LABEL = { run: 'Run', event: 'Event', program: 'Program' };
 const KIND_HINT = {
@@ -511,7 +512,7 @@ export function AdminRunEdit({ id }) {
         setSaved(r);
         setForm({ ...EMPTY, ...Object.fromEntries(Object.keys(EMPTY).map((k) => [k, r[k] ?? ''])),
                   price: r.price ? String(r.price) : '', kind: r.kind || 'run',
-                  classes: r.classes ? String(r.classes) : '', badge_id: r.badge_id || '', payment_mode: r.payment_mode || 'manual', pay_at_venue: !!r.pay_at_venue, checkin_mode: r.checkin_mode || 'venue_qr', published: r.published !== false, discounts_allowed: r.discounts_allowed !== false, class_dates: r.class_dates || [], late_join: !!r.late_join });
+                  classes: r.classes ? String(r.classes) : '', badge_id: r.badge_id || '', payment_mode: r.payment_mode || 'manual', pay_at_venue: !!r.pay_at_venue, checkin_mode: r.checkin_mode || 'venue_qr', published: r.published !== false, discounts_allowed: r.discounts_allowed !== false, class_dates: r.class_dates || [], late_join: !!r.late_join, waiver_required: r.waiver_required !== false });
       })
       .catch((e) => setError(messageFor(e.code)));
   }, [id, isNew]);
@@ -756,6 +757,14 @@ export function AdminRunEdit({ id }) {
             </>
           )}
         </section>
+
+        <label className="toggle-row">
+          <input type="checkbox" checked={!!form.waiver_required} onChange={(e) => setForm((f) => ({ ...f, waiver_required: e.target.checked }))} />
+          <span>
+            <strong>Requires agreeing to the participation terms</strong>
+            <small>People tick the terms once (at sign-up or first check-in); they're asked again only if you change the text under Admin → Terms. Switch off for a purely social event.</small>
+          </span>
+        </label>
 
         <section className="builder" aria-labelledby="vis-h">
           <h2 className="section-title" id="vis-h">Visibility</h2>
@@ -1289,7 +1298,7 @@ function Signups({ run, onChange }) {
           <ol className="su-list">
             {list.map((p, i) => (
               <li key={`${p.phone}-${i}`}>
-                <div className="su-row"><span>{p.name}{p.test && <span className="pill-mini test-pill">Test</span>}</span><span className="muted">{p.phone}</span></div>
+                <div className="su-row"><span>{p.name}{p.test && <span className="pill-mini test-pill">Test</span>}{run.waiver_required && p.agreed === false && <span className="pill-mini warn-pill" title="Hasn't agreed to the participation terms yet">Terms pending</span>}</span><span className="muted">{p.phone}</span></div>
                 {paid && (
                   <div className="pay-row">
                     <span className={`pay-chip pay-${p.status === 'pending' && p.holds === false ? 'cancelled' : payState(p)}`}>
@@ -1608,5 +1617,49 @@ function ClassDates({ dates, start, onChange }) {
         <p className="muted small">Quick fill: <button type="button" className="link inline" onClick={() => weekly(4)}>4 weekly classes</button> · <button type="button" className="link inline" onClick={() => weekly(6)}>6</button> · <button type="button" className="link inline" onClick={() => weekly(8)}>8</button> from the start date.</p>
       )}
     </div>
+  );
+}
+
+
+// ---------- Participation terms ----------
+export function AdminTerms() {
+  const [data, setData] = useState(undefined);
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [confirm, setConfirm] = useState(false);
+  useEffect(() => { adminWaiver().then((d) => { setData(d); setText(d.text || ''); }).catch((e) => { setData(null); setError(messageFor(e.code)); }); }, []);
+  const dirty = data && text.trim() !== (data.text || '').trim();
+
+  async function save() {
+    if (!confirm && data?.agreed > 0) { setConfirm(true); return; }
+    setBusy(true); setError(''); setNotice(''); setConfirm(false);
+    try { const d = await adminSetWaiver(text); setData(d); setText(d.text); setNotice('Saved. Everyone will be asked to agree to the new wording next time they sign up or check in.'); }
+    catch (e) { setError(messageFor(e.code)); } finally { setBusy(false); }
+  }
+
+  return (
+    <main className="shell">
+      <AdminBar />
+      <AdminTabs active="terms" />
+      <h1 className="display">Participation terms</h1>
+      <p className="lede">Shown to every member once, with a tick box, before their first sign-up or check-in. Events can opt out individually in their settings.</p>
+      {data === undefined && <p className="muted">Loading…</p>}
+      {data && (
+        <div className="stack">
+          <p className="muted small">{data.agreed} of {data.members} members with a login have agreed to the current wording{data.updated_at ? ` · last changed ${new Date(data.updated_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}` : ''}.</p>
+          <textarea className="input terms-edit" rows={12} value={text} onChange={(e) => { setText(e.target.value); setConfirm(false); }} aria-label="Participation terms" />
+          <p className="hint">Blank line between paragraphs. {text.length}/5000. A lawyer can tighten this wording for Indian law; this is an acknowledgement of risk, not a full liability release.</p>
+          {confirm && <p className="note">Changing the wording means all {data.agreed} people who've agreed will be asked again. Save anyway?</p>}
+          {notice && !error && <p className="saved" role="status">{notice}</p>}
+          {error && <p className="error" role="alert">{error}</p>}
+          <div className="row-actions">
+            <button type="button" className="btn" disabled={!dirty || busy} onClick={save}>{busy ? 'Saving…' : confirm ? 'Yes, save new wording' : 'Save'}</button>
+            {dirty && <button type="button" className="link" onClick={() => { setText(data.text); setConfirm(false); }}>Discard changes</button>}
+          </div>
+        </div>
+      )}
+    </main>
   );
 }

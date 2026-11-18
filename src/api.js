@@ -70,6 +70,10 @@ const MESSAGES = {
   program_not_joined: "Check-in is only for people who signed up for this program.",
   not_class_day: "There's no class today, so there's nothing to check in to.",
   bad_class_date: "That date isn't one of this program's class days.",
+  waiver_required: 'Please read the participation terms and tick to agree before continuing.',
+  waiver_changed: 'The participation terms were just updated. Please read the new version and agree again.',
+  waiver_too_short: 'The terms need a bit more than that.',
+  waiver_too_long: 'The terms are too long (5,000 characters max).',
   classes_required: 'Enter how many classes the program has (1 to 100).',
   bad_class_date: 'Pick a class date between the start date and today.',
   badge_not_found: 'That badge no longer exists. Pick another.',
@@ -262,10 +266,15 @@ export const pastEvents = () => rpc('past_events');
 export const leaderboard = () => rpc('public_leaderboard');
 export const runDetail = (id) => rpc('run_detail', { p_id: id });
 export const attendRun = (id, code) => rpc('attend_run', { p_id: id, p_code: code });
-export const signUp = (id, answers, venue = false, discount = null) => rpc('sign_up_for_run', { p_id: id, p_answers: answers, p_venue: venue, p_discount: discount || null });
+export const signUp = (id, answers, venue = false, discount = null, agree = false) => rpc('sign_up_for_run', { p_id: id, p_answers: answers, p_venue: venue, p_discount: discount || null, p_agree: !!agree });
+// Participation terms: one text, accepted once per version (at sign-up or first check-in).
+export const waiver = () => rpc('waiver');
+export const acceptWaiver = (version) => rpc('accept_waiver', { p_version: version });
+export const adminWaiver = () => rpc('admin_waiver');
+export const adminSetWaiver = (text) => rpc('admin_set_waiver', { p_text: text });
 export const cancelSignup = (id) => rpc('cancel_signup', { p_id: id });
 export const claimPayment = (id) => rpc('claim_payment', { p_id: id });
-export const checkInRun = (id, code, km) => rpc('check_in_run', { p_id: id, p_code: code, p_km: km });
+export const checkInRun = (id, code, km, agree = false) => rpc('check_in_run', { p_id: id, p_code: code, p_km: km, p_agree: !!agree });
 
 // Google Forms pre-fill: in the form's "Get pre-filled link", type 9999999999 in the phone
 // question and NAME in the name question. We swap in the runner's own details.

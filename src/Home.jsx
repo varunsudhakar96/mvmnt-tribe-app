@@ -13,6 +13,7 @@ const AdminScan = lazy(() => import('./Admin.jsx').then((m) => ({ default: m.Adm
 const AdminRuns = lazy(() => import('./Admin.jsx').then((m) => ({ default: m.AdminRuns })));
 const AdminMembers = lazy(() => import('./Admin.jsx').then((m) => ({ default: m.AdminMembers })));
 const AdminBadges = lazy(() => import('./Admin.jsx').then((m) => ({ default: m.AdminBadges })));
+const AdminTerms = lazy(() => import('./Admin.jsx').then((m) => ({ default: m.AdminTerms })));
 const AdminBadgeDetail = lazy(() => import('./Admin.jsx').then((m) => ({ default: m.AdminBadgeDetail })));
 const AdminRunEdit = lazy(() => import('./Admin.jsx').then((m) => ({ default: m.AdminRunEdit })));
 const Wait = ({ children }) => (
@@ -74,6 +75,7 @@ export default function Home() {
       if (b === 'run' && c) return <Wait><AdminRunEdit id={c} /></Wait>;
       if (b === 'members') return <Wait><AdminMembers /></Wait>;
       if (b === 'badges') return <Wait><AdminBadges /></Wait>;
+      if (b === 'terms') return <Wait><AdminTerms /></Wait>;
       if (b === 'scan') return <Wait><AdminScan eventId={query.get('e') || ''} code={query.get('t') || ''} /></Wait>;
       if (b === 'badge' && c) return <Wait><AdminBadgeDetail id={c} /></Wait>;
       return <Wait><AdminRuns /></Wait>;

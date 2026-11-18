@@ -1,5 +1,5 @@
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
-import { upcomingRuns, pastEvents, runDetail, checkInRun, shareRun, signUp, cancelSignup, claimPayment, payOnline, testPay, uploadSignupFile, priceFor, discounted, prefill, readScan, messageFor, runDate, runTime, formatPhone } from './api.js';
+import { upcomingRuns, pastEvents, runDetail, checkInRun, shareRun, signUp, cancelSignup, claimPayment, payOnline, testPay, uploadSignupFile, priceFor, discounted, waiver, prefill, readScan, messageFor, runDate, runTime, formatPhone } from './api.js';
 import { go, href } from './router.js';
 import Badge from './Badge.jsx';
 import { Ticket } from './Ticket.jsx';
@@ -375,6 +375,27 @@ function PayCard({ run, onChange }) {
   );
 }
 
+// Participation terms with a required tick. Shown until the member has agreed to the current version.
+export function Terms({ terms, agreed, onChange }) {
+  const [open, setOpen] = useState(false);
+  if (terms === null) return <p className="muted small">Loading the participation terms…</p>;
+  const paras = String(terms.text || '').split(/\n\s*\n/).filter(Boolean);
+  const long = (terms.text || '').length > 420;
+  return (
+    <section className="terms" aria-labelledby="terms-h">
+      <h2 className="section-title" id="terms-h">Before you take part</h2>
+      <div className={`terms-text${long && !open ? ' clipped' : ''}`}>
+        {paras.length ? paras.map((t, i) => <p key={i}>{t}</p>) : <p className="muted">Terms unavailable right now. You can still continue.</p>}
+      </div>
+      {long && !open && <button type="button" className="link inline" onClick={() => setOpen(true)}>Read all</button>}
+      <label className="agree-row">
+        <input type="checkbox" checked={!!agreed} onChange={(e) => onChange(e.target.checked)} />
+        <span>I've read this and I agree. I understand there's a risk of injury and I'm taking part by my own choice.</span>
+      </label>
+    </section>
+  );
+}
+
 export function ShareButton({ run, className = 'share-btn', label = 'Share' }) {
   const [note, setNote] = useState('');
   async function share() {
@@ -442,10 +463,13 @@ export function SignupPage({ id, profile }) {
   const [missing, setMissing] = useState([]);
   const [uploading, setUploading] = useState([]);
   const [disc, setDisc] = useState(''); // chosen badge discount key, '' = none
+  const [terms, setTerms] = useState(null);   // participation terms, when they still need agreeing
+  const [agreed, setAgreed] = useState(false);
 
   useEffect(() => {
     runDetail(id)
-      .then((r) => { setRun(r); setAnswers(r?.my_answers || {}); setDisc(r?.my_discount?.key || ''); })
+      .then((r) => { setRun(r); setAnswers(r?.my_answers || {}); setDisc(r?.my_discount?.key || '');
+        if (r && r.waiver_required && !r.waiver_ok) waiver().then(setTerms).catch(() => setTerms({ text: '', version: '' })); })
       .catch((e) => setError(messageFor(e.code)));
   }, [id]);
 
@@ -458,19 +482,21 @@ export function SignupPage({ id, profile }) {
   const canDiscount = run && run.price > 0 && offers.length > 0 && (!holding(run) || (pending(run) && run.my_payment === 'none' && !online(run)));
   const chosen = canDiscount ? offers.find((o) => o.key === disc) : null;
   const due = run ? (canDiscount ? discounted(run.price, chosen?.pct) : priceFor(run)) : 0;
+  const needTerms = run && run.waiver_required && !run.waiver_ok && !holding(run);
 
   async function submit(e, how = 'default') {
     e?.preventDefault?.();
     const miss = fields.filter((f) => f.required && isBlank(answers[f.id])).map((f) => f.id);
     setMissing(miss);
     if (miss.length) { setError(messageFor('answer_required')); return; }
+    if (needTerms && !agreed) { setError(messageFor('waiver_required')); return; }
     setBusy(how); setError('');
     try {
       const clean = Object.fromEntries(fields
         .map((f) => [f.id, f.type === 'checkboxes' ? (answers[f.id] || []) : String(answers[f.id] ?? '').trim()])
         .filter(([, v]) => !isBlank(v)));
       if (payFirst && how === 'pay') {
-        const held = await signUp(id, clean, false, canDiscount ? disc : null); // reserve the spot while they pay (invisible unless paid)
+        const held = await signUp(id, clean, false, canDiscount ? disc : null, agreed); // reserve the spot while they pay (invisible unless paid)
         if (held.signed_up) { setDone(held); return; }                            // a 100% badge discount: nothing to pay
         try { setDone(await (preview(run) ? testPay(id) : payOnline(id))); }
         catch (err) {
@@ -478,7 +504,7 @@ export function SignupPage({ id, profile }) {
           throw err;
         }
       } else {
-        setDone(await signUp(id, clean, payFirst && how === 'venue', canDiscount ? disc : null));
+        setDone(await signUp(id, clean, payFirst && how === 'venue', canDiscount ? disc : null, agreed));
       }
     } catch (err) {
       setError(messageFor(err.code));
@@ -539,19 +565,21 @@ export function SignupPage({ id, profile }) {
             </fieldset>
           )}
 
+          {!closed && !full && needTerms && <Terms terms={terms} agreed={agreed} onChange={setAgreed} />}
+
           {error && run && <p className={error === messageFor('payment_cancelled') ? 'note' : 'error'} role="alert">{error}</p>}
           {!closed && !full && !payFirst && (
-            <button className="btn" type="submit" disabled={!!busy || uploading.length > 0}>
-              {busy ? 'Saving…' : uploading.length ? 'Uploading…' : editing ? 'Save answers' : 'Confirm sign-up'}
+            <button className="btn" type="submit" disabled={!!busy || uploading.length > 0 || (needTerms && !agreed)}>
+              {busy ? 'Saving…' : uploading.length ? 'Uploading…' : editing ? 'Save answers' : needTerms ? 'Agree & sign up' : 'Confirm sign-up'}
             </button>
           )}
           {!closed && !full && payFirst && (
             <div className="stack tight">
-              <button className="btn" type="button" onClick={(e) => submit(e, 'pay')} disabled={!!busy || uploading.length > 0}>
-                {busy === 'pay' ? 'Opening payment…' : uploading.length ? 'Uploading…' : (due === 0 ? 'Sign up free with badge' : `Pay ${rupees(due)} & sign up${preview(run) ? ' (test)' : ''}`)}
+              <button className="btn" type="button" onClick={(e) => submit(e, 'pay')} disabled={!!busy || uploading.length > 0 || (needTerms && !agreed)}>
+                {busy === 'pay' ? 'Opening payment…' : uploading.length ? 'Uploading…' : (due === 0 ? 'Sign up free with badge' : `${needTerms ? 'Agree, pay' : 'Pay'} ${rupees(due)} & sign up${preview(run) ? ' (test)' : ''}`)}
               </button>
               {run.pay_at_venue && (
-                <button className="btn ghost" type="button" onClick={(e) => submit(e, 'venue')} disabled={!!busy || uploading.length > 0}>
+                <button className="btn ghost" type="button" onClick={(e) => submit(e, 'venue')} disabled={!!busy || uploading.length > 0 || (needTerms && !agreed)}>
                   {busy === 'venue' ? 'Saving…' : 'Sign up, pay at the venue'}
                 </button>
               )}
@@ -726,6 +754,8 @@ export function ScanPage({ id, profile }) {
 export function CheckInPage({ id, code, onLogged }) {
   const [run, setRun] = useState(undefined);
   const [km, setKm] = useState('');
+  const [terms, setTerms] = useState(null);
+  const [agreed, setAgreed] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
@@ -735,6 +765,7 @@ export function CheckInPage({ id, code, onLogged }) {
       .then((r) => {
         setRun(r);
         if (r) setKm(kmText(r.my_checkin_km ?? r.run_km ?? 5));
+        if (r && r.waiver_required && !r.waiver_ok) waiver().then(setTerms).catch(() => setTerms({ text: '', version: '' }));
         if (r && !venueScan(r)) setError(messageFor('ticket_only'));
         else if (r && isProgram(r) && !r.ended && !(holding(r) || r.my_classes > 0)) setError(messageFor('program_not_joined'));
         else if (r && !r.check_in_live) setError(messageFor(r.ended ? 'event_ended' : isProgram(r) && !r.is_past ? (r.started ? 'not_class_day' : 'program_not_started') : 'not_today'));
@@ -747,8 +778,9 @@ export function CheckInPage({ id, code, onLogged }) {
   async function log() {
     const n = isRun(run) ? Number(km) : null;
     if (isRun(run) && !(n >= 0.5 && n <= 60)) { setError(messageFor('bad_distance')); return; }
+    if (needTerms && !agreed) { setError(messageFor('waiver_required')); return; }
     setBusy(true); setError('');
-    try { setResult(await checkInRun(id, code, n)); onLogged?.(); }
+    try { setResult(await checkInRun(id, code, n, agreed)); onLogged?.(); }
     catch (e) { setError(messageFor(e.code)); }
     finally { setBusy(false); }
   }
@@ -756,6 +788,7 @@ export function CheckInPage({ id, code, onLogged }) {
   if (result) return <RunLogged r={result} onDone={() => go('')} />;
 
   const blocked = run === null || (run && (!run.check_in_live || !venueScan(run) || (isProgram(run) && !(holding(run) || run.my_classes > 0))));
+  const needTerms = run && run.waiver_required && !run.waiver_ok;
   return (
     <main className="shell">
       <header className="topbar"><a className="link back" href={href(`run/${id}`)}>‹ Back</a></header>
@@ -780,8 +813,9 @@ export function CheckInPage({ id, code, onLogged }) {
               <span className="hint center">km · today's route is {kmText(run.run_km)} km</span>
             </div>
           )}
+          {!blocked && needTerms && <Terms terms={terms} agreed={agreed} onChange={setAgreed} />}
           {error && <p className="error" role="alert">{error}</p>}
-          {!blocked && <button className="btn" onClick={log} disabled={busy}>{busy ? 'Checking in…' : isRun(run) ? 'Log my run' : 'Check me in'}</button>}
+          {!blocked && <button className="btn" onClick={log} disabled={busy || (needTerms && !agreed)}>{busy ? 'Checking in…' : needTerms ? (isRun(run) ? 'Agree & log my run' : 'Agree & check me in') : isRun(run) ? 'Log my run' : 'Check me in'}</button>}
           {blocked && <a className="btn ghost" href={href(`run/${id}`)}>See the {run ? noun(run) : 'event'}</a>}
         </div>
       )}
